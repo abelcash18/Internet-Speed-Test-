@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modern Speed Test PWA</title>
+    <link rel="preconnect" href="https://ipapi.co">
+    <link rel="preconnect" href="https://cdn.jsdelivr.net">
+    <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#667eea">
+    <link rel="stylesheet" href="style.css" media="print" onload="this.media='all'">
+    <noscript><link rel="stylesheet" href="style.css"></noscript>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4" async defer crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Speed Test</h1>
+            <p class="subtitle">Check your internet connection speed</p>
+            <label class="dark-toggle">
+                <input type="checkbox" id="darkToggle" onchange="toggleDarkMode()">
+                <span>🌙 Dark Mode</span>
+            </label>
+        </div>
+
+        <div class="main-display">
+<div class="speed-box" role="main" aria-live="polite" aria-label="Main speed display">
+                <div class="speed-value" id="speedValue" aria-describedby="speedLabel">0</div>
+                <div class="speed-unit" id="speedUnit">Mbps</div>
+                <div class="speed-label" id="speedLabel" aria-hidden="true">Ready</div>
+            </div>
+
+            <button class="start-button" id="startBtn" onclick="startTest()">
+                Start Test
+            </button>
+            <button class="share-button" id="shareBtn" onclick="shareResult()" style="margin-top: 10px; background: #4CAF50;">
+                📱 Share
+            </button>
+        </div>
+
+        <div class="metrics">
+            <div class="metric-item">
+                <span class="metric-label">Download</span>
+                <span class="metric-value" id="downloadSpeed">—</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-label">Upload</span>
+                <span class="metric-value" id="uploadSpeed">—</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-label">Ping</span>
+                <span class="metric-value" id="ping">—</span>
+            </div>
+            <div class="metric-item">
+                <span class="metric-label">Jitter</span>
+                <span class="metric-value" id="jitter">—</span>
+            </div>
+        </div>
+        <canvas id="speedChart" width="400" height="200" style="max-width: 100%; margin: 20px 0; background: var(--glass-bg); border-radius: 16px; padding: 20px;"></canvas>
+
+        <div class="progress-container">
+            <div class="progress-bar" id="progressBar"></div>
+            <div class="progress-text" id="progressText"></div>
+        </div>
+
+        <div class="history-section">
+            <div class="history-header">
+                <h2>📊 History</h2>
+                <button class="clear-btn" onclick="clearHistory()">Clear</button>
+            </div>
+            <div class="history-list" id="historyList">
+                <p class="no-history">No test results yet</p>
+            </div>
+        </div>
+
+        <div class="server-info">
+            <p id="serverInfo">Server: Detecting...</p>
+            <p id="ipInfo">IP: Detecting...</p>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
