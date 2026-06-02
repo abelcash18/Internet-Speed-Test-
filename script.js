@@ -26,18 +26,29 @@ darkMode = getStorage('darkMode', 'false') === 'true';
 
 // Check if API is available
 async function checkAPIAvailability() {
+    // GitHub Pages has no backend; hard-disable all /api/* calls
     if (isGitHubPages) {
         apiAvailable = false;
         return;
     }
-    
+
     try {
         const response = await fetch('/api/ping', { method: 'GET', timeout: 1000 });
         apiAvailable = response.ok || response.status === 200;
+
+        // If endpoint exists but returns 404 (or similar), never try again in this session
+        if (!response.ok && response.status === 404) {
+            apiAvailable = false;
+        }
     } catch (e) {
         apiAvailable = false;
     }
 }
+
+function isApiEnabled() {
+    return !isGitHubPages && apiAvailable;
+}
+
 
 // Modern Speed Test with real server measurements
 document.addEventListener('DOMContentLoaded', async () => {
@@ -161,6 +172,7 @@ async function startTest() {
         // Submit to Speedtest API
         updateProgress(100, 'Submitting results...');
         await submitToSpeedtest(result);
+
         
         setTimeout(resetUI, 2000);
         
@@ -178,10 +190,14 @@ async function measurePingJitter() {
     for (let i = 0; i < iterations; i++) {
         const start = performance.now();
         try {
-            if (apiAvailable) {
+            if (isApiEnabled()) {
                 const resp = await fetch('/api/ping', { signal: AbortSignal.timeout(2000) });
-                if (!resp.ok) throw new Error('API unavailable');
+                if (!resp.ok) {
+                    if (resp.status === 404) apiAvailable = false;
+                    throw new Error('API unavailable');
+                }
             } else {
+
                 // Fallback: ping a lightweight public endpoint
                 await fetch('https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png', { mode: 'no-cors', signal: AbortSignal.timeout(2000) });
             }
@@ -211,9 +227,11 @@ async function measureDownload() {
         const chunkStart = performance.now();
         try {
             let resp;
-            if (apiAvailable) {
+            if (isApiEnabled()) {
                 resp = await fetch(`/api/download-test?size=${chunkMB}`, { signal: AbortSignal.timeout(15000) });
+                if (!resp.ok && resp.status === 404) apiAvailable = false;
             } else {
+
                 // Fallback: download public file
                 resp = await fetch('https://www.w3.org/WAI/WCAG21/Techniques/pdf/pdf_file.zip', { mode: 'no-cors', signal: AbortSignal.timeout(15000) });
             }
@@ -252,17 +270,21 @@ async function measureUpload() {
         const chunkStart = performance.now();
         
         try {
-            if (apiAvailable) {
+            if (isApiEnabled()) {
                 const resp = await fetch('/api/test-upload', {
                     method: 'POST',
                     body: data,
                     signal: AbortSignal.timeout(15000)
                 });
-                
-                if (!resp.ok) throw new Error(`Upload failed: ${resp.status}`);
+
+                if (!resp.ok) {
+                    if (resp.status === 404) apiAvailable = false;
+                    throw new Error(`Upload failed: ${resp.status}`);
+                }
                 const result = await resp.json();
                 totalBytesReceived += result.bytesReceived;
             } else {
+
                 // Fallback: simulate upload (no actual upload to GitHub Pages)
                 totalBytesReceived += chunkSize;
             }
@@ -335,8 +357,9 @@ function resetUI() {
 function shareResult() {
     const result = testResults[0];
     if (!result) return alert('Run a test first!');
-    
-    const text = `Internet Speed Test: ↓${result.download} Mbps ↑${result.upload} Mbps | Ping: ${result.ping}ms | Jitter: ${result.jitter}ms`;
+
+    const text = `Internet Speed Test: ↓${result.download || 0} Mbps ↑${result.upload || 0} Mbps | Ping: ${result.ping || 0}ms | Jitter: ${result.jitter || 0}ms`;
+
     
     if (navigator.share) {
         navigator.share({ title: 'Speed Test Result', text });
@@ -351,8 +374,15 @@ async function submitToSpeedtest(result) {
         console.log('Skipping Speedtest submission on GitHub Pages');
         return;
     }
+    if (!result || typeof result !== 'object') return;
+    
+    // Also require API availability (backend server)
+    if (!apiAvailable) {
+        return;
+    }
     
     try {
+
         // Submit to local server endpoint which handles Speedtest API
         const response = await fetch('/api/submit-to-speedtest', {
             method: 'POST',
@@ -425,9 +455,10 @@ function loadHistory() {
     list.innerHTML = testResults.length ? testResults.map(r => `
         <div class="history-item">
             <div>↓${r.download} ↑${r.upload} Mbps | Ping ${r.ping}ms | ${r.category || ''}</div>
-            <small>${r.timestamp}</small>
+            <small>${r.timestamp || ''}</small>
             ${r.speedTestUrl ? `<div style="margin-top: 5px;"><a href="${r.speedTestUrl}" target="_blank" style="color: #667eea; text-decoration: none; font-size: 12px;">🔗 View on Speedtest</a></div>` : ''}
         </div>
+
     `).join('') : '<p class="no-history">No tests yet</p>';
 }
 
