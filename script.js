@@ -1,14 +1,49 @@
 let testRunning = false;
-let testResults = JSON.parse(localStorage.getItem('speedTestResults')) || [];
 let speedChart = null;
-let darkMode = localStorage.getItem('darkMode') === 'true';
+let darkMode = false;
+
+// Safely access storage with fallback
+function getStorage(key, defaultValue) {
+    try {
+        return localStorage.getItem(key) !== null ? localStorage.getItem(key) : defaultValue;
+    } catch (e) {
+        return defaultValue;
+    }
+}
+
+function setStorage(key, value) {
+    try {
+        localStorage.setItem(key, value);
+    } catch (e) {
+        console.warn('Storage not available:', e);
+    }
+}
+
+let testResults = JSON.parse(getStorage('speedTestResults', '[]'));
+darkMode = getStorage('darkMode', 'false') === 'true';
 
 // Modern Speed Test with real server measurements
 document.addEventListener('DOMContentLoaded', async () => {
     loadHistory();
     initDarkMode();
     detectISP();
-    initChart();
+    
+    // Wait for Chart.js to load before initializing
+    if (window.Chart) {
+        initChart();
+    } else {
+        // Wait up to 3 seconds for Chart.js to load
+        let attempts = 0;
+        const waitForChart = setInterval(() => {
+            if (window.Chart) {
+                initChart();
+                clearInterval(waitForChart);
+            } else if (attempts++ > 30) {
+                console.warn('Chart.js failed to load');
+                clearInterval(waitForChart);
+            }
+        }, 100);
+    }
     
     // Register service worker
     if ('serviceWorker' in navigator) {
@@ -30,7 +65,7 @@ function initDarkMode() {
 function toggleDarkMode() {
     darkMode = !darkMode;
     document.body.classList.toggle('dark-theme');
-    localStorage.setItem('darkMode', darkMode);
+    setStorage('darkMode', darkMode);
 }
 
 async function startTest() {
@@ -86,10 +121,15 @@ async function startTest() {
             upload: upload.toFixed(2),
             ping: pingData.avgPing,
             jitter: pingData.jitter,
-            timestamp: new Date().toLocaleString()
+            timestamp: new Date().toLocaleString(),
+            category: getSpeedCategory(download)
         };
         saveResult(result);
         loadHistory();
+        
+        // Submit to Speedtest API
+        updateProgress(100, 'Submitting results...');
+        await submitToSpeedtest(result);
         
         setTimeout(resetUI, 2000);
         
@@ -242,10 +282,70 @@ function shareResult() {
     }
 }
 
+async function submitToSpeedtest(result) {
+    try {
+        // Submit to local server endpoint which handles Speedtest API
+        const response = await fetch('/api/submit-to-speedtest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                downloadSpeed: parseFloat(result.download),
+                uploadSpeed: parseFloat(result.upload),
+                ping: result.ping,
+                jitter: result.jitter,
+                timestamp: result.timestamp
+            })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (data.speedTestUrl) {
+                console.log('Speedtest result:', data.speedTestUrl);
+                // Store share link in result
+                result.speedTestUrl = data.speedTestUrl;
+                saveResult(result);
+            }
+        }
+    } catch (error) {
+        console.warn('Could not submit to Speedtest:', error);
+        // Continue even if Speedtest submission fails
+    }
+}
+
+function downloadCSV() {
+    if (!testResults.length) return alert('No test results to export!');
+    
+    // Speedtest CSV format compatible
+    const headers = ['Timestamp', 'Download (Mbps)', 'Upload (Mbps)', 'Ping (ms)', 'Jitter (ms)', 'Category'];
+    const rows = testResults.map(r => [
+        r.timestamp || new Date().toISOString(),
+        (r.download || 0).toFixed(2),
+        (r.upload || 0).toFixed(2),
+        r.ping || 0,
+        r.jitter || 0,
+        getSpeedCategory(r.download || 0)
+    ]);
+    
+    // Create CSV content
+    const csvContent = [
+        headers.join(','),
+        ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n');
+    
+    // Download
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `speedtest-results-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+}
+
 function saveResult(result) {
     testResults.unshift(result);
     if (testResults.length > 20) testResults = testResults.slice(0,20);
-    localStorage.setItem('speedTestResults', JSON.stringify(testResults));
+    setStorage('speedTestResults', JSON.stringify(testResults));
 }
 
 function loadHistory() {
@@ -254,8 +354,9 @@ function loadHistory() {
     
     list.innerHTML = testResults.length ? testResults.map(r => `
         <div class="history-item">
-            <div>↓${r.download} ↑${r.upload} Mbps | Ping ${r.ping}ms</div>
+            <div>↓${r.download} ↑${r.upload} Mbps | Ping ${r.ping}ms | ${r.category || ''}</div>
             <small>${r.timestamp}</small>
+            ${r.speedTestUrl ? `<div style="margin-top: 5px;"><a href="${r.speedTestUrl}" target="_blank" style="color: #667eea; text-decoration: none; font-size: 12px;">🔗 View on Speedtest</a></div>` : ''}
         </div>
     `).join('') : '<p class="no-history">No tests yet</p>';
 }
@@ -263,7 +364,7 @@ function loadHistory() {
 function clearHistory() {
     if (confirm('Clear history?')) {
         testResults = [];
-        localStorage.removeItem('speedTestResults');
+        setStorage('speedTestResults', JSON.stringify(testResults));
         loadHistory();
     }
 }
@@ -289,23 +390,37 @@ async function measurePacketLoss() {
     }
 }
 
-async function detectISP() {
+async function detectISP(enrichmentData = null) {
     performance.mark('isp-start');
     try {
         const res = await fetch('https://ipapi.co/json/', { cache: 'no-cache' });
-        const data = await res.json();
-        document.getElementById('serverInfo').textContent = `ISP: ${data.org || 'Unknown'}`;
-        document.getElementById('ipInfo').textContent = `IP: ${data.ip}`;
-    } catch {
-        document.getElementById('serverInfo').textContent = 'ISP: Local';
+        const geoData = await res.json();
+        
+        if (enrichmentData) {
+            // Display enrichment data if available
+            const brand = enrichmentData.display?.brand || 'Unknown';
+            const technology = enrichmentData.display?.technology?.toUpperCase() || '';
+            const downloadMbps = enrichmentData.display?.provisioned?.downloadMbps || '—';
+            const uploadMbps = enrichmentData.display?.provisioned?.uploadMbps || '—';
+            const type = enrichmentData.type || '';
+            
+            document.getElementById('serverInfo').textContent = 
+                `ISP: ${brand} | ${technology}${type ? ' (' + type + ')' : ''} | ↓${downloadMbps} ↑${uploadMbps} Mbps`;
+            document.getElementById('ipInfo').textContent = 
+                `IP: ${geoData.ip} | Lat: ${enrichmentData.location?.latitude?.toFixed(2) || geoData.latitude}, Lon: ${enrichmentData.location?.longitude?.toFixed(2) || geoData.longitude}`;
+        } else {
+            // Fallback to basic IP info
+            document.getElementById('serverInfo').textContent = `ISP: ${geoData.org || 'Unknown'}`;
+            document.getElementById('ipInfo').textContent = 
+                `IP: ${geoData.ip} | Location: ${geoData.city}, ${geoData.country_name}`;
+        }
+    } catch (err) {
+        console.warn('ISP detection failed:', err);
+        document.getElementById('serverInfo').textContent = 'ISP: Detecting...';
+        document.getElementById('ipInfo').textContent = 'IP: Detecting...';
     }
     performance.mark('isp-end');
     performance.measure('ISP Detection', 'isp-start', 'isp-end');
-    if ('web-vitals' in window) {
-        window.webVitals.getCLS(console.log);
-        window.webVitals.getFCP(console.log);
-        window.webVitals.getLCP(console.log);
-    }
 }
 
 // Web Vitals polyfill for older browsers

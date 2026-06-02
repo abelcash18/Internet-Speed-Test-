@@ -17,11 +17,32 @@ app.use(compression());
 app.use(cors());
 app.use(express.static(__dirname));
 app.use(express.json({ limit: '50mb' }));
-app.use(express.raw({ limit: '50mb', type: '*/*' })); // For upload measurements
+app.use(express.raw({ limit: '50mb', type: 'application/octet-stream' }));
+app.use(express.raw({ limit: '50mb', type: 'application/blob' }));
+// Catch-all for other binary uploads
+app.use((req, res, next) => {
+    if (req.path === '/api/test-upload' && req.method === 'POST') {
+        let data = '';
+        req.setEncoding('binary');
+        req.on('data', chunk => data += chunk);
+        req.on('end', () => {
+            req.rawBody = Buffer.from(data, 'binary');
+            next();
+        });
+    } else {
+        next();
+    }
+});
 
 // Serve index.html for root
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// Serve favicon to prevent 404 errors
+app.get('/favicon.ico', (req, res) => {
+    res.set('Content-Type', 'image/svg+xml');
+    res.send(`<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='75' font-size='75'>⚡</text></svg>`);
 });
 
 // Ping endpoint for latency measurement
@@ -38,7 +59,19 @@ app.post('/api/results', express.json(), (req, res) => {
 
 // Real upload test endpoint - measures bytes received and time
 app.post('/api/test-upload', (req, res) => {
-    const receivedBytes = req.body.length;
+    let receivedBytes = 0;
+    
+    // Try to get bytes from different sources
+    if (req.rawBody) {
+        receivedBytes = req.rawBody.length;
+    } else if (Buffer.isBuffer(req.body)) {
+        receivedBytes = req.body.length;
+    } else if (req.get('content-length')) {
+        receivedBytes = parseInt(req.get('content-length'));
+    } else if (typeof req.body === 'string') {
+        receivedBytes = Buffer.byteLength(req.body);
+    }
+    
     const receivedTime = Date.now();
     
     res.json({ 
@@ -78,6 +111,247 @@ app.get('/api/download-test', (req, res) => {
     });
     
     res.end();
+});
+
+// CSV export endpoint
+app.post('/api/export-csv', express.json(), (req, res) => {
+    const results = req.body.results || [];
+    
+    if (!results.length) {
+        return res.status(400).json({ error: 'No results to export' });
+    }
+    
+    // Speedtest CSV format compatible
+    const headers = 'Timestamp,Download (Mbps),Upload (Mbps),Ping (ms),Jitter (ms),Category\n';
+    const rows = results.map(r => {
+        const timestamp = r.timestamp || new Date().toISOString();
+        const download = (r.download || 0).toFixed(2);
+        const upload = (r.upload || 0).toFixed(2);
+        const ping = r.ping || 0;
+        const jitter = r.jitter || 0;
+        const category = r.category || 'Unknown';
+        return `"${timestamp}","${download}","${upload}","${ping}","${jitter}","${category}"`;
+    }).join('\n');
+    
+    const csv = headers + rows;
+    res.set({
+        'Content-Type': 'text/csv',
+        'Content-Disposition': `attachment; filename="speedtest-results-${new Date().toISOString().slice(0,10)}.csv"`
+    });
+    res.send(csv);
+});
+
+// Submit results endpoint (optional - for cloud storage)
+app.post('/api/submit-results', express.json(), (req, res) => {
+    const { download, upload, ping, jitter, timestamp, location, isp } = req.body;
+    
+    // In production, save to database
+    const result = {
+        id: Date.now().toString(36),
+        download,
+        upload,
+        ping,
+        jitter,
+        timestamp: timestamp || new Date().toISOString(),
+        location,
+        isp,
+        submittedAt: new Date().toISOString()
+    };
+    
+    console.log('Result submitted:', result);
+    res.json({ 
+        success: true, 
+        resultId: result.id,
+        message: 'Results saved successfully'
+    });
+});
+
+// Submit to Speedtest API
+app.post('/api/submit-to-speedtest', express.json(), async (req, res) => {
+    const { downloadSpeed, uploadSpeed, ping, jitter, timestamp } = req.body;
+    
+    try {
+        // Generate result data compatible with Speedtest format
+        const resultId = Date.now().toString(36);
+        const baseUrl = `${req.protocol}://${req.get('host')}`;
+        const queryParams = new URLSearchParams({
+            download: downloadSpeed.toFixed(2),
+            upload: uploadSpeed.toFixed(2),
+            ping: ping,
+            jitter: jitter
+        });
+        const shareUrl = `${baseUrl}/results/${resultId}?${queryParams.toString()}`;
+        
+        const speedTestResult = {
+            timestamp: timestamp || new Date().toISOString(),
+            download: downloadSpeed,
+            upload: uploadSpeed,
+            ping: ping,
+            jitter: jitter,
+            resultId: resultId,
+            url: shareUrl
+        };
+        
+        console.log('Speedtest result generated:', speedTestResult);
+        
+        // Return shareable URL (or submit to actual Speedtest API if you have credentials)
+        res.json({
+            success: true,
+            speedTestUrl: speedTestResult.url,
+            resultId: resultId,
+            data: speedTestResult
+        });
+    } catch (error) {
+        console.error('Error submitting to Speedtest:', error);
+        res.status(400).json({ error: 'Failed to submit to Speedtest', message: error.message });
+    }
+});
+
+// Results display page
+app.get('/results/:resultId', (req, res) => {
+    const { resultId } = req.params;
+    
+    const htmlContent = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Speed Test Result ${resultId}</title>
+        <style>
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                margin: 0;
+                padding: 20px;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+            }
+            .result-card {
+                background: white;
+                border-radius: 16px;
+                padding: 40px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                text-align: center;
+                max-width: 500px;
+            }
+            .result-card h1 {
+                color: #667eea;
+                margin: 0 0 10px 0;
+                font-size: 28px;
+            }
+            .metric {
+                display: flex;
+                justify-content: space-around;
+                margin: 30px 0;
+                padding: 20px 0;
+                border-top: 1px solid #eee;
+                border-bottom: 1px solid #eee;
+            }
+            .metric-item {
+                flex: 1;
+            }
+            .metric-label {
+                font-size: 12px;
+                color: #999;
+                text-transform: uppercase;
+                margin-bottom: 5px;
+            }
+            .metric-value {
+                font-size: 24px;
+                font-weight: bold;
+                color: #667eea;
+            }
+            .timestamp {
+                color: #999;
+                font-size: 12px;
+                margin-top: 20px;
+            }
+            .share-buttons {
+                display: flex;
+                gap: 10px;
+                justify-content: center;
+                margin-top: 30px;
+            }
+            .share-btn {
+                padding: 10px 20px;
+                background: #667eea;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 14px;
+                text-decoration: none;
+                display: inline-block;
+            }
+            .share-btn:hover {
+                background: #764ba2;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="result-card">
+            <h1>⚡ Your Speed Test Results</h1>
+            <div class="metric">
+                <div class="metric-item">
+                    <div class="metric-label">Download</div>
+                    <div class="metric-value" id="download">—</div>
+                    <div style="font-size: 12px; color: #999;">Mbps</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Upload</div>
+                    <div class="metric-value" id="upload">—</div>
+                    <div style="font-size: 12px; color: #999;">Mbps</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Ping</div>
+                    <div class="metric-value" id="ping">—</div>
+                    <div style="font-size: 12px; color: #999;">ms</div>
+                </div>
+            </div>
+            <div class="metric">
+                <div class="metric-item">
+                    <div class="metric-label">Jitter</div>
+                    <div class="metric-value" id="jitter">—</div>
+                    <div style="font-size: 12px; color: #999;">ms</div>
+                </div>
+            </div>
+            <div class="timestamp">Result ID: ${resultId}</div>
+            <div class="share-buttons">
+                <button class="share-btn" onclick="shareResult()">📱 Share</button>
+                <button class="share-btn" onclick="copyLink()">📋 Copy Link</button>
+            </div>
+        </div>
+        <script>
+            // Parse query params if results passed in URL
+            const params = new URLSearchParams(window.location.search);
+            document.getElementById('download').textContent = params.get('download') || '—';
+            document.getElementById('upload').textContent = params.get('upload') || '—';
+            document.getElementById('ping').textContent = params.get('ping') || '—';
+            document.getElementById('jitter').textContent = params.get('jitter') || '—';
+            
+            function shareResult() {
+                const text = \`Speed Test Result: ↓\${params.get('download') || 0} ↑\${params.get('upload') || 0} Mbps | Ping: \${params.get('ping') || 0}ms\`;
+                if (navigator.share) {
+                    navigator.share({ title: 'Speed Test Result', text });
+                } else {
+                    navigator.clipboard.writeText(window.location.href);
+                    alert('Link copied!');
+                }
+            }
+            
+            function copyLink() {
+                navigator.clipboard.writeText(window.location.href);
+                alert('Link copied to clipboard!');
+            }
+        </script>
+    </body>
+    </html>
+    \`;
+    
+    res.send(htmlContent);
 });
 
 // Start server

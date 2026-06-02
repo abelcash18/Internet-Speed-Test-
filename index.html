@@ -9,9 +9,10 @@
     <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#667eea">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='75' font-size='75'>⚡</text></svg>" type="image/svg+xml">
     <link rel="stylesheet" href="style.css" media="print" onload="this.media='all'">
     <noscript><link rel="stylesheet" href="style.css"></noscript>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4" async defer crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 </head>
 <body>
     <div class="container">
@@ -36,6 +37,9 @@
             </button>
             <button class="share-button" id="shareBtn" onclick="shareResult()" style="margin-top: 10px; background: #4CAF50;">
                 📱 Share
+            </button>
+            <button class="share-button" id="csvBtn" onclick="downloadCSV()" style="margin-top: 10px; background: #2196F3;">
+                📥 Download CSV
             </button>
         </div>
 
