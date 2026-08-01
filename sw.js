@@ -1,5 +1,5 @@
 // PWA Service Worker - Cache static assets
-const CACHE_NAME = 'speedtest-v2';
+const CACHE_NAME = 'speedtest-v3';
 const urlsToCache = [
   '/',
   '/index.html',

@@ -2,7 +2,6 @@ let testRunning = false;
 let speedChart = null;
 let darkMode = false;
 let apiAvailable = false;
-let isGitHubPages = window.location.hostname.includes('github.io');
 
 // Safely access storage with fallback
 function getStorage(key, defaultValue) {
@@ -26,27 +25,16 @@ darkMode = getStorage('darkMode', 'false') === 'true';
 
 // Check if API is available
 async function checkAPIAvailability() {
-    // GitHub Pages has no backend; hard-disable all /api/* calls
-    if (isGitHubPages) {
-        apiAvailable = false;
-        return;
-    }
-
     try {
-        const response = await fetch('/api/ping', { method: 'GET', timeout: 1000 });
-        apiAvailable = response.ok || response.status === 200;
-
-        // If endpoint exists but returns 404 (or similar), never try again in this session
-        if (!response.ok && response.status === 404) {
-            apiAvailable = false;
-        }
+        const response = await fetch(`/api/ping?_=${Date.now()}`, { signal: AbortSignal.timeout(2000), cache: 'no-store' });
+        apiAvailable = response.ok;
     } catch (e) {
         apiAvailable = false;
     }
 }
 
 function isApiEnabled() {
-    return !isGitHubPages && apiAvailable;
+    return apiAvailable;
 }
 
 
@@ -58,8 +46,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Check API availability
     await checkAPIAvailability();
-    if (!apiAvailable && isGitHubPages) {
-        showWarning('⚠️ Running in demo mode (GitHub Pages). Speed measurements may be limited. For full functionality, run locally with: npm install && npm start');
+    if (!apiAvailable) {
+        showWarning('Real-time testing needs the included Node server. Run “npm start” and open http://localhost:3000.');
     }
     
     // Wait for Chart.js to load before initializing
@@ -79,8 +67,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }, 100);
     }
     
-    // Register service worker (only if not on GitHub Pages)
-    if ('serviceWorker' in navigator && !isGitHubPages) {
+    if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js')
             .then(reg => console.log('SW registered'))
             .catch(err => console.log('SW registration not available (GitHub Pages)'));
@@ -121,10 +108,13 @@ async function startTest() {
     resetMetrics();
     updateProgress(0, 'Initializing...');
     
-    const speeds = []; // For chart
-    const startTime = performance.now();
-    
     try {
+        await checkAPIAvailability();
+        if (!isApiEnabled()) {
+            throw new Error('Real-time test server is unavailable. Start the app with npm start.');
+        }
+        const speeds = []; // For chart
+        const startTime = performance.now();
         // Phase 1: Ping + Jitter (10 samples)
         updateProgress(15, 'Measuring ping...');
         const pingData = await measurePingJitter();
@@ -190,21 +180,12 @@ async function measurePingJitter() {
     for (let i = 0; i < iterations; i++) {
         const start = performance.now();
         try {
-            if (isApiEnabled()) {
-                const resp = await fetch('/api/ping', { signal: AbortSignal.timeout(2000) });
-                if (!resp.ok) {
-                    if (resp.status === 404) apiAvailable = false;
-                    throw new Error('API unavailable');
-                }
-            } else {
-
-                // Fallback: ping a lightweight public endpoint
-                await fetch('https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png', { mode: 'no-cors', signal: AbortSignal.timeout(2000) });
-            }
+            const resp = await fetch(`/api/ping?_=${Date.now()}-${i}`, { signal: AbortSignal.timeout(2000), cache: 'no-store' });
+            if (!resp.ok) throw new Error('Ping request failed');
             const end = performance.now();
             pings.push(end - start);
         } catch (e) {
-            pings.push(Math.random() * 100 + 20); // Simulated fallback (20-120ms)
+            throw new Error('Unable to measure ping. Check the test server connection.');
         }
         await new Promise(r => setTimeout(r, 50));
     }
@@ -217,93 +198,46 @@ async function measurePingJitter() {
 }
 
 async function measureDownload() {
-    const totalSizeMB = 25;
-    const chunkMB = 5;
-    const chunks = Math.ceil(totalSizeMB / chunkMB);
-    let totalBytes = 0;
-    let totalTime = 0;
-    
-    for (let i = 0; i < chunks; i++) {
-        const chunkStart = performance.now();
-        try {
-            let resp;
-            if (isApiEnabled()) {
-                resp = await fetch(`/api/download-test?size=${chunkMB}`, { signal: AbortSignal.timeout(15000) });
-                if (!resp.ok && resp.status === 404) apiAvailable = false;
-            } else {
-
-                // Fallback: download public file
-                resp = await fetch('https://www.w3.org/WAI/WCAG21/Techniques/pdf/pdf_file.zip', { mode: 'no-cors', signal: AbortSignal.timeout(15000) });
-            }
-            
-            if (!resp.ok) throw new Error('Download failed');
-            const blob = await resp.blob();
-            const chunkEnd = performance.now();
-            
-            totalBytes += blob.size;
-            totalTime += (chunkEnd - chunkStart);
-        } catch (e) {
-            console.warn('Download chunk failed:', e);
-            // Estimate: simulate reasonable download speed
-            totalBytes += chunkMB * 1024 * 1024;
-            totalTime += 3000; // ~67 Mbps estimate
-        }
-        updateProgress(35 + (i/chunks)*30, `Download ${((i+1)/chunks*100).toFixed(0)}%`);
+    const sizeMB = 25;
+    const expectedBytes = sizeMB * 1024 * 1024;
+    const started = performance.now();
+    const response = await fetch(`/api/download-test?size=${sizeMB}&_=${Date.now()}`, {
+        signal: AbortSignal.timeout(30000), cache: 'no-store'
+    });
+    if (!response.ok || !response.body) throw new Error('Download test failed');
+    const reader = response.body.getReader();
+    let bytes = 0;
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.byteLength;
+        const elapsed = Math.max(0.05, (performance.now() - started) / 1000);
+        const current = (bytes * 8 / 1024 / 1024) / elapsed;
+        document.getElementById('downloadSpeed').textContent = current.toFixed(2) + ' Mbps';
+        updateProgress(35 + Math.min(30, (bytes / expectedBytes) * 30), `Downloading… ${current.toFixed(1)} Mbps`);
     }
-    
-    const seconds = Math.max(0.1, totalTime / 1000);
-    const bits = totalBytes * 8;
-    const mbps = (bits / 1024 / 1024) / seconds;
-    return Math.max(0.1, mbps);
+    const elapsed = Math.max(0.05, (performance.now() - started) / 1000);
+    return (bytes * 8 / 1024 / 1024) / elapsed;
 }
 
 async function measureUpload() {
-    const totalSizeMB = 25;
-    const chunkMB = 5;
-    const chunks = Math.ceil(totalSizeMB / chunkMB);
-    let totalBytesReceived = 0;
-    let totalTime = 0;
-    
-    for (let i = 0; i < chunks; i++) {
-        const chunkSize = chunkMB * 1024 * 1024;
-        const data = new Blob([new ArrayBuffer(chunkSize)]);
-        const chunkStart = performance.now();
-        
-        try {
-            if (isApiEnabled()) {
-                const resp = await fetch('/api/test-upload', {
-                    method: 'POST',
-                    body: data,
-                    signal: AbortSignal.timeout(15000)
-                });
-
-                if (!resp.ok) {
-                    if (resp.status === 404) apiAvailable = false;
-                    throw new Error(`Upload failed: ${resp.status}`);
-                }
-                const result = await resp.json();
-                totalBytesReceived += result.bytesReceived;
-            } else {
-
-                // Fallback: simulate upload (no actual upload to GitHub Pages)
-                totalBytesReceived += chunkSize;
-            }
-            
-            const chunkEnd = performance.now();
-            totalTime += (chunkEnd - chunkStart);
-        } catch (e) {
-            console.warn('Upload chunk failed:', e);
-            // Estimate: add simulated upload time
-            totalBytesReceived += chunkSize;
-            totalTime += 3000; // ~67 Mbps estimate
-        }
-        updateProgress(75 + (i/chunks)*20, `Upload ${((i+1)/chunks*100).toFixed(0)}%`);
-    }
-    
-    const seconds = Math.max(0.1, totalTime / 1000);
-    const bits = totalBytesReceived * 8;
-    const mbps = (bits / 1024 / 1024) / seconds;
-    return Math.max(0.1, mbps);
+    const sizeMB = 25;
+    const bytes = sizeMB * 1024 * 1024;
+    const payload = new Uint8Array(bytes);
+    for (let i = 0; i < payload.length; i += 4096) payload[i] = i & 0xff;
+    const started = performance.now();
+    const response = await fetch(`/api/test-upload?_=${Date.now()}`, {
+        method: 'POST', body: payload, signal: AbortSignal.timeout(30000), cache: 'no-store',
+        headers: { 'Content-Type': 'application/octet-stream' }
+    });
+    if (!response.ok) throw new Error('Upload test failed');
+    const result = await response.json();
+    if (result.bytesReceived !== bytes) throw new Error('Upload was interrupted');
+    const elapsed = Math.max(0.05, (performance.now() - started) / 1000);
+    const speed = (bytes * 8 / 1024 / 1024) / elapsed;
+    document.getElementById('uploadSpeed').textContent = speed.toFixed(2) + ' Mbps';
+    updateProgress(95, `Uploading… ${speed.toFixed(1)} Mbps`);
+    return speed;
 }
 
 function initChart() {
@@ -369,11 +303,6 @@ function shareResult() {
 }
 
 async function submitToSpeedtest(result) {
-    // Skip Speedtest submission on GitHub Pages
-    if (isGitHubPages) {
-        console.log('Skipping Speedtest submission on GitHub Pages');
-        return;
-    }
     if (!result || typeof result !== 'object') return;
     
     // Also require API availability (backend server)

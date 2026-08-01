@@ -10,7 +10,7 @@ A fast, lightweight, and fully deployable internet speed test application built 
 ✅ **Jitter Analysis** - Measures connection stability  
 ✅ **Test History** - Stores up to 20 recent test results in browser  
 ✅ **Responsive Design** - Works on desktop, tablet, and mobile  
-✅ **No Backend Required** - Runs entirely in the browser  
+✅ **Real transfer measurements** - Uses the included server to measure actual download and upload traffic  
 ✅ **Local Storage** - History persists across sessions  
 
 ## Project Structure
@@ -27,17 +27,22 @@ speed-test-app/
 
 ### Option 1: Simple Local Deployment
 1. Download or clone this repository
-2. Open `index.html` in any modern web browser
-3. That's it! The app is ready to use
+2. Run `npm install` and then `npm start`
+3. Open `http://localhost:3000` in a modern browser
 
-### Option 2: Deploy to GitHub Pages
+### Option 2: Deploy to a Node.js host
+The speed test needs its `server.js` endpoints, so deploy it to a host that runs
+Node.js (for example Render, Railway, Fly.io, or a VPS). Static-only hosts such
+as GitHub Pages cannot perform real upload and download measurements.
+
+### Option 3: Deploy to GitHub Pages (interface only)
 1. Create a GitHub repository
 2. Push these files to the repo
 3. Go to Settings → Pages
 4. Select "Deploy from a branch" and choose `main` branch
 5. Your app is now live at `https://yourusername.github.io/repo-name/`
 
-### Option 3: Deploy to Netlify
+### Option 4: Deploy to Netlify
 1. Go to [netlify.com](https://netlify.com)
 2. Click "New site from Git"
 3. Connect your GitHub repo
@@ -46,34 +51,24 @@ speed-test-app/
    - **Publish directory:** . (current folder)
 5. Deploy!
 
-### Option 4: Deploy to Vercel
+### Option 5: Deploy to Vercel
 1. Go to [vercel.com](https://vercel.com)
 2. Click "New Project"
 3. Import your GitHub repository
 4. Deploy (no build configuration needed)
 
-### Option 5: Deploy to Any Web Host
+### Option 6: Deploy to Any Node.js Web Host
 1. FTP/SSH the files to your web hosting
 2. Make sure `index.html` is in the root or a public folder
 3. Access via your domain
 
-### Option 6: Run Locally with Python (Quick Server)
+### Run Locally with Node.js
 ```bash
-# Python 3
-python -m http.server 8000
+# Install project dependencies once
+npm install
 
-# Then open: http://localhost:8000
-```
-
-### Option 7: Run Locally with Node.js
-```bash
-# Install http-server globally
-npm install -g http-server
-
-# Run in the app directory
-http-server
-
-# Access at the provided URL (usually http://localhost:8080)
+# Start the real-time test server
+npm start
 ```
 
 ## How to Use
@@ -139,9 +134,8 @@ if (testResults.length > 20) {  // Change 20 to desired number
 
 ## Limitations & Notes
 
-⚠️ Upload speed is simulated (requires backend server for real upload testing)  
-⚠️ Results may vary based on actual network conditions  
-⚠️ Cross-origin requests may be limited in some networks  
+⚠️ A local test measures the connection between your browser and your computer. Deploy the included Node server to a remote host to measure your internet route to that host.  
+⚠️ Results may vary based on server location and current network conditions.  
 ⚠️ Best results when tested on a stable connection  
 
 ## API Integration (Optional)

@@ -13,26 +13,12 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
-app.use(compression());
+// Do not compress the test payloads: compressed zero-filled data would make a
+// bandwidth test report the compression ratio instead of the connection speed.
+app.use(compression({ filter: (req, res) => !req.path.startsWith('/api/') && compression.filter(req, res) }));
 app.use(cors());
 app.use(express.static(__dirname));
 app.use(express.json({ limit: '50mb' }));
-app.use(express.raw({ limit: '50mb', type: 'application/octet-stream' }));
-app.use(express.raw({ limit: '50mb', type: 'application/blob' }));
-// Catch-all for other binary uploads
-app.use((req, res, next) => {
-    if (req.path === '/api/test-upload' && req.method === 'POST') {
-        let data = '';
-        req.setEncoding('binary');
-        req.on('data', chunk => data += chunk);
-        req.on('end', () => {
-            req.rawBody = Buffer.from(data, 'binary');
-            next();
-        });
-    } else {
-        next();
-    }
-});
 
 // Serve index.html for root
 app.get('/', (req, res) => {
@@ -57,29 +43,21 @@ app.post('/api/results', express.json(), (req, res) => {
     res.json({ success: true, shareId: id || Date.now().toString(36) });
 });
 
-// Real upload test endpoint - measures bytes received and time
+// Real upload test endpoint. Consume the request as a stream rather than
+// buffering it through a body parser, so the browser measures an actual upload.
 app.post('/api/test-upload', (req, res) => {
     let receivedBytes = 0;
-    
-    // Try to get bytes from different sources
-    if (req.rawBody) {
-        receivedBytes = req.rawBody.length;
-    } else if (Buffer.isBuffer(req.body)) {
-        receivedBytes = req.body.length;
-    } else if (req.get('content-length')) {
-        receivedBytes = parseInt(req.get('content-length'));
-    } else if (typeof req.body === 'string') {
-        receivedBytes = Buffer.byteLength(req.body);
-    }
-    
-    const receivedTime = Date.now();
-    
-    res.json({ 
-        success: true,
-        bytesReceived: receivedBytes,
-        receivedTime: receivedTime,
-        serverTime: Date.now()
+    const startedAt = Date.now();
+    req.on('data', chunk => { receivedBytes += chunk.length; });
+    req.on('end', () => {
+        res.set('Cache-Control', 'no-store');
+        res.json({
+            success: true,
+            bytesReceived: receivedBytes,
+            elapsedMs: Date.now() - startedAt
+        });
     });
+    req.on('error', () => res.status(400).json({ error: 'Upload interrupted' }));
 });
 
 // Packet loss test - send/receive 100 packets
@@ -91,26 +69,31 @@ app.post('/api/packet-loss', express.json(), (req, res) => {
     res.json({ lossPercent: parseFloat(lossPercent) });
 });
 
-// Real download test endpoint - multiple chunks possible
+// Real download test endpoint. Stream incompressible bytes and honor backpressure.
 app.get('/api/download-test', (req, res) => {
-    const sizeMB = parseInt(req.query.size) || 25; // MB
+    const sizeMB = Math.min(100, Math.max(1, parseInt(req.query.size, 10) || 25));
     const size = sizeMB * 1024 * 1024;
-    const buffer = Buffer.alloc(size);
-    
     res.set({
         'Content-Type': 'application/octet-stream',
         'Content-Length': size,
-        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Cache-Control': 'no-store, no-cache, must-revalidate',
         'Access-Control-Allow-Origin': '*'
     });
-    
-    const startTime = Date.now();
-    res.write(buffer, () => {
-        const endTime = Date.now();
-        console.log(`Download ${sizeMB}MB served in ${(endTime - startTime)}ms`);
-    });
-    
-    res.end();
+    const chunk = Buffer.allocUnsafe(256 * 1024);
+    for (let i = 0; i < chunk.length; i++) chunk[i] = (i * 31 + 17) & 0xff;
+    let sent = 0;
+    const send = () => {
+        while (sent < size) {
+            const bytes = Math.min(chunk.length, size - sent);
+            sent += bytes;
+            if (!res.write(bytes === chunk.length ? chunk : chunk.subarray(0, bytes))) {
+                res.once('drain', send);
+                return;
+            }
+        }
+        res.end();
+    };
+    send();
 });
 
 // CSV export endpoint
@@ -349,7 +332,7 @@ app.get('/results/:resultId', (req, res) => {
         </script>
     </body>
     </html>
-    \`;
+    `;
     
     res.send(htmlContent);
 });
