@@ -13,7 +13,7 @@ const CONFIG = {
   pingUrl: 'https://speed.cloudflare.com/__down?bytes=0',
   downloadDurationMs: 7000,
   uploadDurationMs: 7000,
-  uploadChunkBytes: 24 * 1024 * 1024, // 24MB payload, trimmed by browser support
+  uploadChunkBytes: 24 * 1024 * 1024, // 24MB payload
   pingSamples: 6,
   historyLimit: 20,
 };
@@ -32,7 +32,7 @@ const CX = 160, CY = 160, R = 118;
 const START_ANGLE = -135, END_ANGLE = 135;
 
 function polarPoint(cx, cy, r, angleDeg) {
-  const rad = (angleDeg - 0) * (Math.PI / 180);
+  const rad = angleDeg * (Math.PI / 180);
   return { x: cx + r * Math.sin(rad), y: cy - r * Math.cos(rad) };
 }
 
@@ -43,8 +43,6 @@ function describeArc(cx, cy, r, startAngle, endAngle) {
   return `M ${p1.x} ${p1.y} A ${r} ${r} 0 ${largeArc} 1 ${p2.x} ${p2.y}`;
 }
 
-// Piecewise-linear mapping from a raw value to t in [0,1] across
-// non-uniform tick breakpoints, so ticks read like a real speedometer.
 function valueToT(value, breakpoints) {
   const n = breakpoints.length - 1;
   if (value <= breakpoints[0]) return 0;
@@ -98,7 +96,6 @@ function drawTicks(breakpoints) {
     text.textContent = val;
     tickLayer.appendChild(text);
 
-    // minor tick between major ticks
     if (i < n) {
       const midAngle = angle + (0.5 / n) * (END_ANGLE - START_ANGLE);
       const mOuter = polarPoint(CX, CY, R + 9, midAngle);
@@ -147,7 +144,7 @@ const themeToggle = document.getElementById('themeToggle');
 function applyTheme(theme) {
   root.setAttribute('data-theme', theme);
   themeToggle.setAttribute('aria-pressed', theme === 'light' ? 'true' : 'false');
-  setGaugeScale(currentScaleKey); // refresh accent bindings
+  setGaugeScale(currentScaleKey);
 }
 
 (function initTheme() {
@@ -172,6 +169,7 @@ function loadHistory() {
   try { return JSON.parse(localStorage.getItem('signal_history') || '[]'); }
   catch { return []; }
 }
+
 function saveHistory(list) {
   localStorage.setItem('signal_history', JSON.stringify(list.slice(0, CONFIG.historyLimit)));
 }
@@ -262,7 +260,7 @@ async function runPingTest() {
     try {
       await fetch(`${CONFIG.pingUrl}&_=${Date.now()}${i}`, { cache: 'no-store' });
       const rtt = performance.now() - t0;
-      if (i > 0) samples.push(rtt); // drop first (connection warm-up)
+      if (i > 0) samples.push(rtt);
       setGaugeValue(rtt);
       pingVal.textContent = rtt.toFixed(0);
     } catch (e) {
@@ -282,7 +280,7 @@ function runXhrMeasured({ method, url, body, durationMs, onProgress }) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open(method, url, true);
-    if (method === 'GET') xhr.responseType = 'arraybuffer';
+    
     const t0 = performance.now();
     let finished = false;
 
@@ -301,15 +299,13 @@ function runXhrMeasured({ method, url, body, durationMs, onProgress }) {
 
     xhr.onerror = () => { if (!finished) { finished = true; reject(new Error('network')); } };
     xhr.onabort = () => { /* handled via timer finish() */ };
-    xhr.onload = () => finish(xhr.responseType === 'arraybuffer' ? (xhr.response ? xhr.response.byteLength : 0) : body ? body.size : 0);
+    xhr.onload = () => finish(0);
 
     const timer = setTimeout(() => {
-      // Stop after target duration; use last known progress for the estimate.
       try { xhr.abort(); } catch {}
     }, durationMs);
 
     xhr.onloadend = () => clearTimeout(timer);
-
     xhr.send(body || null);
   });
 }
@@ -331,7 +327,8 @@ async function runDownloadTest() {
       if (dt > 0.05) {
         const instMbps = (dBytes * 8) / dt / 1_000_000;
         setGaugeValue(Math.max(instMbps, 0));
-        lastLoaded = loaded; lastT = elapsedMs;
+        lastLoaded = loaded; 
+        lastT = elapsedMs;
       }
       finalMbps = (loaded * 8) / (elapsedMs / 1000) / 1_000_000;
       downVal.textContent = finalMbps.toFixed(1);
@@ -346,12 +343,17 @@ async function runDownloadTest() {
 
 function randomBlob(sizeBytes) {
   const chunkSize = 65536;
-  const buf = new Uint8Array(sizeBytes);
-  for (let offset = 0; offset < sizeBytes; offset += chunkSize) {
-    const len = Math.min(chunkSize, sizeBytes - offset);
-    crypto.getRandomValues(buf.subarray(offset, offset + len));
+  const chunk = new Uint8Array(chunkSize);
+  crypto.getRandomValues(chunk);
+  
+  const parts = [];
+  let remaining = sizeBytes;
+  while (remaining > 0) {
+    const currentSize = Math.min(remaining, chunkSize);
+    parts.push(chunk.subarray(0, currentSize));
+    remaining -= currentSize;
   }
-  return new Blob([buf]);
+  return new Blob(parts, { type: 'application/octet-stream' });
 }
 
 async function runUploadTest() {
@@ -375,7 +377,8 @@ async function runUploadTest() {
       if (dt > 0.05) {
         const instMbps = (dBytes * 8) / dt / 1_000_000;
         setGaugeValue(Math.max(instMbps, 0));
-        lastLoaded = loaded; lastT = elapsedMs;
+        lastLoaded = loaded; 
+        lastT = elapsedMs;
       }
       finalMbps = (loaded * 8) / (elapsedMs / 1000) / 1_000_000;
       upVal.textContent = finalMbps.toFixed(1);
