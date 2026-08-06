@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+venv/
+.venv/
+
+# Build artifacts
+dist/
+build/
+*.o
+*.pyc
+
+# Logs & Databases
+*.log
+*.sqlite
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE configurations
+.vscode/
+.idea/
