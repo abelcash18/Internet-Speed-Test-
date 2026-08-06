@@ -453,3 +453,28 @@ startBtn.addEventListener('click', runFullTest);
 /* Initial paint */
 setGaugeScale('download');
 setGaugeValue(0);
+
+function processEvent(timestamp) {
+  console.log("Processing event at:", timestamp);
+}
+
+function wrappedEmit(event) {
+  if (!event || typeof event.timestamp === "undefined") {
+    console.warn("Missing timestamp in event:", event);
+    return;
+  }
+  // Safe usage
+  processEvent(event.timestamp);
+}
+
+const otherData = {
+  timestamp: Date.now(),
+  value: "example"
+};
+
+console.log(otherData.timestamp);
+
+wrappedEmit({
+  timestamp: Date.now(),
+  ...otherData
+});
