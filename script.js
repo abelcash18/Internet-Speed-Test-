@@ -2,6 +2,8 @@ let testRunning = false;
 let speedChart = null;
 let darkMode = false;
 let apiAvailable = false;
+let apiChecked = false;
+const isGitHubPages = window.location.hostname.endsWith('.github.io') || window.location.protocol === 'file:';
 
 // Safely access storage with fallback
 function getStorage(key, defaultValue) {
@@ -25,16 +27,28 @@ darkMode = getStorage('darkMode', 'false') === 'true';
 
 // Check if API is available
 async function checkAPIAvailability() {
+    if (isGitHubPages) {
+        apiAvailable = false;
+        apiChecked = true;
+        return apiAvailable;
+    }
+
+    if (apiChecked) {
+        return apiAvailable;
+    }
+
+    apiChecked = true;
     try {
         const response = await fetch(`/api/ping?_=${Date.now()}`, { signal: AbortSignal.timeout(2000), cache: 'no-store' });
         apiAvailable = response.ok;
     } catch (e) {
         apiAvailable = false;
     }
+    return apiAvailable;
 }
 
 function isApiEnabled() {
-    return apiAvailable;
+    return apiAvailable && !isGitHubPages;
 }
 
 
@@ -43,18 +57,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     loadHistory();
     initDarkMode();
     detectISP();
-    
-    // Check API availability
+
     await checkAPIAvailability();
-    if (!apiAvailable) {
-        showWarning('Real-time testing needs the included Node server. Run “npm start” and open http://localhost:3000.');
+
+    if (isGitHubPages) {
+        showWarning('GitHub Pages can show the interface, but the full speed test requires the local Node server. Run npm start locally.');
+        const btn = document.getElementById('startBtn');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Local server required';
+        }
+    } else if (!apiAvailable) {
+        showWarning('Real-time testing needs the included Node server. Run npm start and open http://localhost:3000.');
     }
-    
-    // Wait for Chart.js to load before initializing
+
     if (window.Chart) {
         initChart();
     } else {
-        // Wait up to 3 seconds for Chart.js to load
         let attempts = 0;
         const waitForChart = setInterval(() => {
             if (window.Chart) {
@@ -66,11 +85,11 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }, 100);
     }
-    
+
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js')
             .then(reg => console.log('SW registered'))
-            .catch(err => console.log('SW registration not available (GitHub Pages)'));
+            .catch(err => console.log('SW registration not available (insecure origin or static host)', err));
     }
 });
 
@@ -137,7 +156,7 @@ async function startTest() {
         // Phase 4: Packet Loss
         updateProgress(90, 'Packet loss test...');
         const packetLoss = await measurePacketLoss();
-        // Will display in new metric later
+        document.getElementById('packetLoss').textContent = packetLoss.lossPercent.toFixed(2) + ' %';
         
         // Finalize
         updateProgress(100, 'Complete!');
@@ -153,6 +172,7 @@ async function startTest() {
             upload: upload.toFixed(2),
             ping: pingData.avgPing,
             jitter: pingData.jitter,
+            packetLoss: packetLoss.lossPercent,
             timestamp: new Date().toLocaleString(),
             category: getSpeedCategory(download)
         };
@@ -245,15 +265,39 @@ function initChart() {
     if (ctx) {
         speedChart = new Chart(ctx, {
             type: 'line',
-            data: { datasets: [{ label: 'Speed (Mbps)', borderColor: '#667eea', data: [] }] },
-            options: { responsive: true, scales: { y: { beginAtZero: true } } }
+            data: {
+                datasets: [{
+                    label: 'Speed (Mbps)',
+                    borderColor: '#667eea',
+                    backgroundColor: 'rgba(102,126,234,0.15)',
+                    fill: true,
+                    tension: 0.35,
+                    pointRadius: 4,
+                    data: []
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: {
+                        type: 'linear',
+                        title: { display: true, text: 'Seconds' },
+                        ticks: { precision: 0 }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        title: { display: true, text: 'Mbps' }
+                    }
+                }
+            }
         });
     }
 }
 
 function updateChart(speeds) {
     if (speedChart) {
-        speedChart.data.datasets[0].data = speeds;
+        speedChart.data.datasets[0].data = speeds.map(point => ({ x: point.time, y: point.speed }));
         speedChart.update('none');
     }
 }
@@ -268,23 +312,31 @@ function getSpeedCategory(speed) {
 function updateProgress(percent, text) {
     const bar = document.getElementById('progressBar');
     const txt = document.getElementById('progressText');
-    bar.style.width = percent + '%';
-    txt.textContent = text;
+    if (bar) bar.style.width = `${percent}%`;
+    if (txt) txt.textContent = text;
 }
 
 function resetMetrics() {
-    ['downloadSpeed', 'uploadSpeed', 'ping', 'jitter'].forEach(id => {
-        document.getElementById(id).textContent = '—';
+    ['downloadSpeed', 'uploadSpeed', 'ping', 'jitter', 'packetLoss'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '—';
     });
-    document.getElementById('speedValue').textContent = '0';
-    document.getElementById('speedLabel').textContent = 'Testing...';
+    const speedValue = document.getElementById('speedValue');
+    const speedLabel = document.getElementById('speedLabel');
+    if (speedValue) speedValue.textContent = '0';
+    if (speedLabel) speedLabel.textContent = 'Testing...';
 }
 
 function resetUI() {
-    document.getElementById('startBtn').disabled = false;
-    document.getElementById('startBtn').textContent = 'Test Again';
-    document.getElementById('progressText').textContent = '';
-    document.getElementById('progressBar').style.width = '0%';
+    const startBtn = document.getElementById('startBtn');
+    if (startBtn) {
+        startBtn.disabled = false;
+        startBtn.textContent = 'Test Again';
+    }
+    const progressText = document.getElementById('progressText');
+    if (progressText) progressText.textContent = '';
+    const progressBar = document.getElementById('progressBar');
+    if (progressBar) progressBar.style.width = '0%';
     testRunning = false;
 }
 
@@ -343,25 +395,20 @@ async function submitToSpeedtest(result) {
 
 function downloadCSV() {
     if (!testResults.length) return alert('No test results to export!');
-    
-    // Speedtest CSV format compatible
-    const headers = ['Timestamp', 'Download (Mbps)', 'Upload (Mbps)', 'Ping (ms)', 'Jitter (ms)', 'Category'];
-    const rows = testResults.map(r => [
-        r.timestamp || new Date().toISOString(),
-        (r.download || 0).toFixed(2),
-        (r.upload || 0).toFixed(2),
-        r.ping || 0,
-        r.jitter || 0,
-        getSpeedCategory(r.download || 0)
-    ]);
-    
-    // Create CSV content
-    const csvContent = [
-        headers.join(','),
-        ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
-    ].join('\n');
-    
-    // Download
+
+    const headers = ['Timestamp', 'Download (Mbps)', 'Upload (Mbps)', 'Ping (ms)', 'Jitter (ms)', 'Packet Loss (%)', 'Category'];
+    const rows = testResults.map(r => {
+        const timestamp = r.timestamp || new Date().toISOString();
+        const download = parseFloat(r.download) || 0;
+        const upload = parseFloat(r.upload) || 0;
+        const ping = parseInt(r.ping, 10) || 0;
+        const jitter = parseInt(r.jitter, 10) || 0;
+        const packetLoss = typeof r.packetLoss !== 'undefined' ? parseFloat(r.packetLoss).toFixed(2) : '';
+        const category = r.category || getSpeedCategory(download);
+        return [timestamp, download.toFixed(2), upload.toFixed(2), ping, jitter, packetLoss, category];
+    });
+
+    const csvContent = [headers.join(','), ...rows.map(row => row.map(cell => `"${cell}"`).join(','))].join('\n');
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -383,7 +430,7 @@ function loadHistory() {
     
     list.innerHTML = testResults.length ? testResults.map(r => `
         <div class="history-item">
-            <div>↓${r.download} ↑${r.upload} Mbps | Ping ${r.ping}ms | ${r.category || ''}</div>
+            <div>↓${r.download} ↑${r.upload} Mbps | Ping ${r.ping}ms | Jitter ${r.jitter}ms | Loss ${typeof r.packetLoss !== 'undefined' ? Number(r.packetLoss).toFixed(2) : '—'}%</div>
             <small>${r.timestamp || ''}</small>
             ${r.speedTestUrl ? `<div style="margin-top: 5px;"><a href="${r.speedTestUrl}" target="_blank" style="color: #667eea; text-decoration: none; font-size: 12px;">🔗 View on Speedtest</a></div>` : ''}
         </div>
