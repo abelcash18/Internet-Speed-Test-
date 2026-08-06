@@ -1,530 +1,431 @@
-let testRunning = false;
-let speedChart = null;
-let darkMode = false;
-let apiAvailable = false;
-let apiChecked = false;
-const isGitHubPages = window.location.hostname.endsWith('.github.io') || window.location.protocol === 'file:';
+'use strict';
 
-// Safely access storage with fallback
-function getStorage(key, defaultValue) {
-    try {
-        return localStorage.getItem(key) !== null ? localStorage.getItem(key) : defaultValue;
-    } catch (e) {
-        return defaultValue;
-    }
+/* ============================================================
+   CONFIG
+   Swap these endpoints for your own server if you have one —
+   any host that (a) serves a large file with permissive CORS
+   for download, and (b) accepts a POST body with permissive
+   CORS for upload, will work.
+   ============================================================ */
+const CONFIG = {
+  downloadUrl: 'https://speed.cloudflare.com/__down?bytes=100000000',
+  uploadUrl: 'https://speed.cloudflare.com/__up',
+  pingUrl: 'https://speed.cloudflare.com/__down?bytes=0',
+  downloadDurationMs: 7000,
+  uploadDurationMs: 7000,
+  uploadChunkBytes: 24 * 1024 * 1024, // 24MB payload, trimmed by browser support
+  pingSamples: 6,
+  historyLimit: 20,
+};
+
+const SCALES = {
+  download: { breakpoints: [0, 5, 10, 25, 50, 100, 250, 500, 1000], unit: 'Mbps', varName: '--accent-down' },
+  upload:   { breakpoints: [0, 2, 5, 10, 25, 50, 100, 250, 500],    unit: 'Mbps', varName: '--accent-up' },
+  ping:     { breakpoints: [0, 10, 25, 50, 100, 200, 400],          unit: 'ms',   varName: '--accent-ping' },
+};
+
+/* ============================================================
+   GAUGE — polar geometry helpers
+   270° sweep, 0° = top (12 o'clock), clockwise, -135..135
+   ============================================================ */
+const CX = 160, CY = 160, R = 118;
+const START_ANGLE = -135, END_ANGLE = 135;
+
+function polarPoint(cx, cy, r, angleDeg) {
+  const rad = (angleDeg - 0) * (Math.PI / 180);
+  return { x: cx + r * Math.sin(rad), y: cy - r * Math.cos(rad) };
 }
 
-function setStorage(key, value) {
-    try {
-        localStorage.setItem(key, value);
-    } catch (e) {
-        console.warn('Storage not available:', e);
-    }
+function describeArc(cx, cy, r, startAngle, endAngle) {
+  const p1 = polarPoint(cx, cy, r, startAngle);
+  const p2 = polarPoint(cx, cy, r, endAngle);
+  const largeArc = endAngle - startAngle <= 180 ? 0 : 1;
+  return `M ${p1.x} ${p1.y} A ${r} ${r} 0 ${largeArc} 1 ${p2.x} ${p2.y}`;
 }
 
-let testResults = [];
-try {
-    const stored = getStorage('speedTestResults', '[]');
-    testResults = JSON.parse(stored);
-    if (!Array.isArray(testResults)) testResults = [];
-} catch (e) {
-    testResults = [];
+// Piecewise-linear mapping from a raw value to t in [0,1] across
+// non-uniform tick breakpoints, so ticks read like a real speedometer.
+function valueToT(value, breakpoints) {
+  const n = breakpoints.length - 1;
+  if (value <= breakpoints[0]) return 0;
+  if (value >= breakpoints[n]) return 1;
+  for (let i = 0; i < n; i++) {
+    const a = breakpoints[i], b = breakpoints[i + 1];
+    if (value >= a && value <= b) {
+      const local = (value - a) / (b - a);
+      return (i + local) / n;
+    }
+  }
+  return 1;
 }
 
-darkMode = getStorage('darkMode', 'false') === 'true';
+const svg = document.getElementById('gaugeSvg');
+const tickLayer = document.getElementById('tickLayer');
+const trackArc = document.getElementById('trackArc');
+const progressArc = document.getElementById('progressArc');
+const needleGroup = document.getElementById('needleGroup');
+const sweepGroup = document.getElementById('sweepGroup');
+const readoutNumber = document.getElementById('readoutNumber');
+const readoutUnit = document.getElementById('readoutUnit');
+const statusDot = document.getElementById('statusDot');
+const statusText = document.getElementById('statusText');
 
-// Check if API is available
-async function checkAPIAvailability() {
-    if (isGitHubPages) {
-        apiAvailable = false;
-        apiChecked = true;
-        return apiAvailable;
-    }
+trackArc.setAttribute('d', describeArc(CX, CY, R, START_ANGLE, END_ANGLE));
+progressArc.setAttribute('d', describeArc(CX, CY, R, START_ANGLE, END_ANGLE));
+const ARC_LEN = progressArc.getTotalLength();
+progressArc.style.strokeDasharray = `${ARC_LEN}`;
+progressArc.style.strokeDashoffset = `${ARC_LEN}`;
 
-    if (apiChecked) {
-        return apiAvailable;
-    }
+let currentScaleKey = 'download';
 
-    apiChecked = true;
-    try {
-        const response = await fetch(`/api/ping?_=${Date.now()}`, { signal: AbortSignal.timeout(2000), cache: 'no-store' });
-        apiAvailable = response.ok;
-    } catch (e) {
-        apiAvailable = false;
+function drawTicks(breakpoints) {
+  tickLayer.innerHTML = '';
+  const n = breakpoints.length - 1;
+  breakpoints.forEach((val, i) => {
+    const angle = START_ANGLE + (i / n) * (END_ANGLE - START_ANGLE);
+    const outer = polarPoint(CX, CY, R + 12, angle);
+    const inner = polarPoint(CX, CY, R + 2, angle);
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', inner.x); line.setAttribute('y1', inner.y);
+    line.setAttribute('x2', outer.x); line.setAttribute('y2', outer.y);
+    line.setAttribute('class', 'tick-major');
+    tickLayer.appendChild(line);
+
+    const labelPos = polarPoint(CX, CY, R + 28, angle);
+    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.setAttribute('x', labelPos.x); text.setAttribute('y', labelPos.y + 4);
+    text.setAttribute('class', 'tick-label');
+    text.textContent = val;
+    tickLayer.appendChild(text);
+
+    // minor tick between major ticks
+    if (i < n) {
+      const midAngle = angle + (0.5 / n) * (END_ANGLE - START_ANGLE);
+      const mOuter = polarPoint(CX, CY, R + 9, midAngle);
+      const mInner = polarPoint(CX, CY, R + 2, midAngle);
+      const mLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      mLine.setAttribute('x1', mInner.x); mLine.setAttribute('y1', mInner.y);
+      mLine.setAttribute('x2', mOuter.x); mLine.setAttribute('y2', mOuter.y);
+      mLine.setAttribute('class', 'tick-minor');
+      tickLayer.appendChild(mLine);
     }
-    return apiAvailable;
+  });
 }
 
-function isApiEnabled() {
-    return apiAvailable && !isGitHubPages;
+function setGaugeScale(key) {
+  currentScaleKey = key;
+  const s = SCALES[key];
+  drawTicks(s.breakpoints);
+  readoutUnit.textContent = s.unit;
+  svg.style.setProperty('--accent-current', `var(${s.varName})`);
+  document.documentElement.style.setProperty('--accent-current', `var(${s.varName})`);
+  document.documentElement.style.setProperty('--accent-current-soft', `var(${s.varName}-soft)`);
 }
 
+function setGaugeValue(value) {
+  const s = SCALES[currentScaleKey];
+  const t = valueToT(value, s.breakpoints);
+  progressArc.style.strokeDashoffset = `${ARC_LEN * (1 - t)}`;
+  const angle = START_ANGLE + t * (END_ANGLE - START_ANGLE);
+  needleGroup.style.transform = `rotate(${angle}deg)`;
+  readoutNumber.textContent = value >= 100 ? value.toFixed(0) : value.toFixed(1);
+}
 
-// Modern Speed Test with real server measurements
-document.addEventListener('DOMContentLoaded', async () => {
-    const startBtn = document.getElementById('startBtn');
-    if (startBtn) {
-        startBtn.disabled = true;
-        startBtn.textContent = 'Checking server...';
-    }
+function setSweeping(active) {
+  sweepGroup.classList.toggle('active', active);
+  statusDot.classList.toggle('live', active);
+}
 
-    loadHistory();
-    initDarkMode();
-    detectISP();
+function setStatus(msg) { statusText.textContent = msg; }
 
-    await checkAPIAvailability();
+/* ============================================================
+   THEME
+   ============================================================ */
+const root = document.documentElement;
+const themeToggle = document.getElementById('themeToggle');
 
-    if (isGitHubPages) {
-        showWarning('GitHub Pages can show the interface, but the full speed test requires the local Node server. Run npm start locally.');
-        if (startBtn) {
-            startBtn.disabled = true;
-            startBtn.textContent = 'Local server required';
-        }
-    } else if (!apiAvailable) {
-        showWarning('Real-time testing needs the included Node server. Run npm start and open http://localhost:3000.');
-        if (startBtn) {
-            startBtn.disabled = true;
-            startBtn.textContent = 'Server unavailable';
-        }
-    } else {
-        if (startBtn) {
-            startBtn.disabled = false;
-            startBtn.textContent = 'Start Test';
-        }
-    }
+function applyTheme(theme) {
+  root.setAttribute('data-theme', theme);
+  themeToggle.setAttribute('aria-pressed', theme === 'light' ? 'true' : 'false');
+  setGaugeScale(currentScaleKey); // refresh accent bindings
+}
 
-    if (window.Chart) {
-        initChart();
-    } else {
-        let attempts = 0;
-        const waitForChart = setInterval(() => {
-            if (window.Chart) {
-                initChart();
-                clearInterval(waitForChart);
-            } else if (attempts++ > 30) {
-                console.warn('Chart.js failed to load');
-                clearInterval(waitForChart);
-            }
-        }, 100);
-    }
+(function initTheme() {
+  const saved = localStorage.getItem('signal_theme');
+  const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+  applyTheme(saved || (prefersLight ? 'light' : 'dark'));
+})();
 
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.min.js')
-            .then(reg => console.log('SW registered'))
-            .catch(err => console.log('SW registration not available (insecure origin or static host)', err));
-    }
+themeToggle.addEventListener('click', () => {
+  const next = root.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+  localStorage.setItem('signal_theme', next);
+  applyTheme(next);
 });
 
-function showWarning(message) {
-    const warning = document.createElement('div');
-    warning.style.cssText = 'position: fixed; top: 20px; right: 20px; background: #ff9800; color: white; padding: 15px 20px; border-radius: 8px; z-index: 1000; max-width: 300px; font-size: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.2);';
-    warning.textContent = message;
-    document.body.appendChild(warning);
-    setTimeout(() => warning.remove(), 8000);
-}
-
-// Dark mode toggle
-function initDarkMode() {
-    if (darkMode) {
-        document.body.classList.add('dark-theme');
-    }
-    const toggle = document.getElementById('darkToggle');
-    if (toggle) toggle.checked = darkMode;
-}
-
-function toggleDarkMode() {
-    darkMode = !darkMode;
-    document.body.classList.toggle('dark-theme');
-    setStorage('darkMode', darkMode);
-}
-
-async function startTest() {
-    if (testRunning) return;
-    
-    testRunning = true;
-    const btn = document.getElementById('startBtn');
-    btn.disabled = true;
-    btn.textContent = 'Testing...';
-    
-    resetMetrics();
-    updateProgress(0, 'Initializing...');
-    
-    try {
-        await checkAPIAvailability();
-        if (!isApiEnabled()) {
-            throw new Error('Real-time test server is unavailable. Start the app with npm start.');
-        }
-        const speeds = []; // For chart
-        const startTime = performance.now();
-        // Phase 1: Ping + Jitter (10 samples)
-        updateProgress(15, 'Measuring ping...');
-        const pingData = await measurePingJitter();
-        document.getElementById('ping').textContent = pingData.avgPing + ' ms';
-        document.getElementById('jitter').textContent = pingData.jitter + ' ms';
-        speeds.push({time: 0, speed: 0});
-        
-        // Phase 2: Download (25MB total, chunks)
-        updateProgress(35, 'Download test...');
-        const download = await measureDownload();
-        document.getElementById('downloadSpeed').textContent = download.toFixed(2) + ' Mbps';
-        speeds.push({time: (performance.now() - startTime)/1000, speed: download});
-        
-// Phase 3: Upload (25MB)
-        updateProgress(75, 'Upload test...');
-        const upload = await measureUpload();
-        document.getElementById('uploadSpeed').textContent = upload.toFixed(2) + ' Mbps';
-        speeds.push({time: (performance.now() - startTime)/1000, speed: upload});
-        
-        // Phase 4: Packet Loss
-        updateProgress(90, 'Packet loss test...');
-        const packetLoss = await measurePacketLoss();
-        document.getElementById('packetLoss').textContent = packetLoss.lossPercent.toFixed(2) + ' %';
-        
-        // Finalize
-        updateProgress(100, 'Complete!');
-        const mainSpeed = (download + upload) / 2;
-        document.getElementById('speedValue').textContent = mainSpeed.toFixed(1);
-        document.getElementById('speedLabel').textContent = getSpeedCategory(mainSpeed);
-        
-        updateChart(speeds);
-        
-        // Save result
-        const result = {
-            download: download.toFixed(2),
-            upload: upload.toFixed(2),
-            ping: pingData.avgPing,
-            jitter: pingData.jitter,
-            packetLoss: packetLoss.lossPercent,
-            timestamp: new Date().toLocaleString(),
-            category: getSpeedCategory(download)
-        };
-        saveResult(result);
-        loadHistory();
-        
-        // Submit to Speedtest API
-        updateProgress(100, 'Submitting results...');
-        await submitToSpeedtest(result);
-
-        
-        setTimeout(resetUI, 2000);
-        
-    } catch (error) {
-        console.error('Test error:', error);
-        document.getElementById('speedLabel').textContent = 'Error: ' + error.message;
-        setTimeout(resetUI, 2000);
-    }
-}
-
-async function measurePingJitter() {
-    const pings = [];
-    const iterations = 10;
-    
-    for (let i = 0; i < iterations; i++) {
-        const start = performance.now();
-        try {
-            const resp = await fetch(`/api/ping?_=${Date.now()}-${i}`, { signal: AbortSignal.timeout(2000), cache: 'no-store' });
-            if (!resp.ok) throw new Error('Ping request failed');
-            const end = performance.now();
-            pings.push(end - start);
-        } catch (e) {
-            throw new Error('Unable to measure ping. Check the test server connection.');
-        }
-        await new Promise(r => setTimeout(r, 50));
-    }
-    
-    const avg = pings.reduce((a,b)=>a+b)/pings.length;
-    const variance = pings.reduce((sum, p) => sum + Math.pow(p - avg, 2), 0) / pings.length;
-    const jitter = Math.sqrt(variance);
-    
-    return { avgPing: Math.round(avg), jitter: Math.round(jitter) };
-}
-
-async function measureDownload() {
-    const sizeMB = 25;
-    const expectedBytes = sizeMB * 1024 * 1024;
-    const started = performance.now();
-    const response = await fetch(`/api/download-test?size=${sizeMB}&_=${Date.now()}`, {
-        signal: AbortSignal.timeout(30000), cache: 'no-store'
-    });
-    if (!response.ok || !response.body) throw new Error('Download test failed');
-    const reader = response.body.getReader();
-    let bytes = 0;
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        bytes += value.byteLength;
-        const elapsed = Math.max(0.05, (performance.now() - started) / 1000);
-        const current = (bytes * 8 / 1024 / 1024) / elapsed;
-        document.getElementById('downloadSpeed').textContent = current.toFixed(2) + ' Mbps';
-        updateProgress(35 + Math.min(30, (bytes / expectedBytes) * 30), `Downloading… ${current.toFixed(1)} Mbps`);
-    }
-    const elapsed = Math.max(0.05, (performance.now() - started) / 1000);
-    return (bytes * 8 / 1024 / 1024) / elapsed;
-}
-
-async function measureUpload() {
-    const sizeMB = 25;
-    const bytes = sizeMB * 1024 * 1024;
-    const payload = new Uint8Array(bytes);
-    for (let i = 0; i < payload.length; i += 4096) payload[i] = i & 0xff;
-    const started = performance.now();
-    const response = await fetch(`/api/test-upload?_=${Date.now()}`, {
-        method: 'POST', body: payload, signal: AbortSignal.timeout(30000), cache: 'no-store',
-        headers: { 'Content-Type': 'application/octet-stream' }
-    });
-    if (!response.ok) throw new Error('Upload test failed');
-    const result = await response.json();
-    if (result.bytesReceived !== bytes) throw new Error('Upload was interrupted');
-    const elapsed = Math.max(0.05, (performance.now() - started) / 1000);
-    const speed = (bytes * 8 / 1024 / 1024) / elapsed;
-    document.getElementById('uploadSpeed').textContent = speed.toFixed(2) + ' Mbps';
-    updateProgress(95, `Uploading… ${speed.toFixed(1)} Mbps`);
-    return speed;
-}
-
-function initChart() {
-    const ctx = document.getElementById('speedChart')?.getContext('2d');
-    if (ctx) {
-        speedChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                datasets: [{
-                    label: 'Speed (Mbps)',
-                    borderColor: '#667eea',
-                    backgroundColor: 'rgba(102,126,234,0.15)',
-                    fill: true,
-                    tension: 0.35,
-                    pointRadius: 4,
-                    data: []
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: { legend: { display: false } },
-                scales: {
-                    x: {
-                        type: 'linear',
-                        title: { display: true, text: 'Seconds' },
-                        ticks: { precision: 0 }
-                    },
-                    y: {
-                        beginAtZero: true,
-                        title: { display: true, text: 'Mbps' }
-                    }
-                }
-            }
-        });
-    }
-}
-
-function updateChart(speeds) {
-    if (speedChart) {
-        speedChart.data.datasets[0].data = speeds.map(point => ({ x: point.time, y: point.speed }));
-        speedChart.update('none');
-    }
-}
-
-function getSpeedCategory(speed) {
-    if (speed < 5) return 'Very Slow 🐌';
-    if (speed < 25) return 'Slow 🐢';
-    if (speed < 100) return 'Good ✅';
-    return 'Excellent ⚡';
-}
-
-function updateProgress(percent, text) {
-    const bar = document.getElementById('progressBar');
-    const txt = document.getElementById('progressText');
-    if (bar) bar.style.width = `${percent}%`;
-    if (txt) txt.textContent = text;
-}
-
-function resetMetrics() {
-    ['downloadSpeed', 'uploadSpeed', 'ping', 'jitter', 'packetLoss'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = '—';
-    });
-    const speedValue = document.getElementById('speedValue');
-    const speedLabel = document.getElementById('speedLabel');
-    if (speedValue) speedValue.textContent = '0';
-    if (speedLabel) speedLabel.textContent = 'Testing...';
-}
-
-function resetUI() {
-    const startBtn = document.getElementById('startBtn');
-    if (startBtn) {
-        startBtn.disabled = false;
-        startBtn.textContent = 'Test Again';
-    }
-    const progressText = document.getElementById('progressText');
-    if (progressText) progressText.textContent = '';
-    const progressBar = document.getElementById('progressBar');
-    if (progressBar) progressBar.style.width = '0%';
-    testRunning = false;
-}
-
-function shareResult() {
-    const result = testResults[0];
-    if (!result) return alert('Run a test first!');
-
-    const text = `Internet Speed Test: ↓${result.download || 0} Mbps ↑${result.upload || 0} Mbps | Ping: ${result.ping || 0}ms | Jitter: ${result.jitter || 0}ms`;
-
-    
-    if (navigator.share) {
-        navigator.share({ title: 'Speed Test Result', text });
-    } else {
-        navigator.clipboard.writeText(text).then(() => alert('Result copied!'));
-    }
-}
-
-async function submitToSpeedtest(result) {
-    if (!result || typeof result !== 'object') return;
-    
-    // Also require API availability (backend server)
-    if (!apiAvailable) {
-        return;
-    }
-    
-    try {
-
-        // Submit to local server endpoint which handles Speedtest API
-        const response = await fetch('/api/submit-to-speedtest', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                downloadSpeed: parseFloat(result.download),
-                uploadSpeed: parseFloat(result.upload),
-                ping: result.ping,
-                jitter: result.jitter,
-                timestamp: result.timestamp
-            }),
-            signal: AbortSignal.timeout(5000)
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            if (data.speedTestUrl) {
-                console.log('Speedtest result:', data.speedTestUrl);
-                // Store share link in result
-                result.speedTestUrl = data.speedTestUrl;
-                saveResult(result);
-            }
-        }
-    } catch (error) {
-        console.warn('Could not submit to Speedtest:', error);
-        // Continue even if Speedtest submission fails
-    }
-}
-
-function downloadCSV() {
-    if (!testResults.length) return alert('No test results to export!');
-
-    const headers = ['Timestamp', 'Download (Mbps)', 'Upload (Mbps)', 'Ping (ms)', 'Jitter (ms)', 'Packet Loss (%)', 'Category'];
-    const rows = testResults.map(r => {
-        const timestamp = r.timestamp || new Date().toISOString();
-        const download = parseFloat(r.download) || 0;
-        const upload = parseFloat(r.upload) || 0;
-        const ping = parseInt(r.ping, 10) || 0;
-        const jitter = parseInt(r.jitter, 10) || 0;
-        const packetLoss = typeof r.packetLoss !== 'undefined' ? parseFloat(r.packetLoss).toFixed(2) : '';
-        const category = r.category || getSpeedCategory(download);
-        return [timestamp, download.toFixed(2), upload.toFixed(2), ping, jitter, packetLoss, category];
-    });
-
-    const csvContent = [headers.join(','), ...rows.map(row => row.map(cell => `"${cell}"`).join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `speedtest-results-${new Date().toISOString().slice(0,10)}.csv`;
-    a.click();
-    window.URL.revokeObjectURL(url);
-}
-
-function saveResult(result) {
-    testResults.unshift(result);
-    if (testResults.length > 20) testResults = testResults.slice(0,20);
-    setStorage('speedTestResults', JSON.stringify(testResults));
-}
+/* ============================================================
+   HISTORY
+   ============================================================ */
+const historyBody = document.getElementById('historyBody');
+const clearHistoryBtn = document.getElementById('clearHistory');
 
 function loadHistory() {
-    const list = document.getElementById('historyList');
-    if (!list) return;
-    
-    list.innerHTML = testResults.length ? testResults.map(r => `
-        <div class="history-item">
-            <div>↓${r.download} ↑${r.upload} Mbps | Ping ${r.ping}ms | Jitter ${r.jitter}ms | Loss ${typeof r.packetLoss !== 'undefined' ? Number(r.packetLoss).toFixed(2) : '—'}%</div>
-            <small>${r.timestamp || ''}</small>
-            ${r.speedTestUrl ? `<div style="margin-top: 5px;"><a href="${r.speedTestUrl}" target="_blank" style="color: #667eea; text-decoration: none; font-size: 12px;">🔗 View on Speedtest</a></div>` : ''}
-        </div>
-
-    `).join('') : '<p class="no-history">No tests yet</p>';
+  try { return JSON.parse(localStorage.getItem('signal_history') || '[]'); }
+  catch { return []; }
+}
+function saveHistory(list) {
+  localStorage.setItem('signal_history', JSON.stringify(list.slice(0, CONFIG.historyLimit)));
 }
 
-function clearHistory() {
-    if (confirm('Clear history?')) {
-        testResults = [];
-        setStorage('speedTestResults', JSON.stringify(testResults));
-        loadHistory();
-    }
+function renderHistory() {
+  const list = loadHistory();
+  if (!list.length) {
+    historyBody.innerHTML = `<tr class="history-empty-row"><td colspan="5">No tests yet — run one above and it'll show up here.</td></tr>`;
+  } else {
+    historyBody.innerHTML = list.map(r => `
+      <tr>
+        <td>${new Date(r.time).toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}</td>
+        <td>${r.download.toFixed(1)} Mbps</td>
+        <td>${r.upload.toFixed(1)} Mbps</td>
+        <td>${r.ping.toFixed(0)} ms</td>
+        <td>${r.jitter.toFixed(1)} ms</td>
+      </tr>
+    `).join('');
+  }
+  renderSparkline('downSpark', list.map(r => r.download).reverse());
+  renderSparkline('upSpark', list.map(r => r.upload).reverse());
 }
 
-async function measurePacketLoss() {
-    const packets = [];
-    for (let i = 0; i < 100; i++) {
-        packets.push({ id: i, timestamp: Date.now() });
-    }
+function renderSparkline(svgId, values) {
+  const el = document.getElementById(svgId);
+  el.innerHTML = '';
+  if (values.length < 2) return;
+  const max = Math.max(...values, 1);
+  const min = 0;
+  const w = 100, h = 28;
+  const pts = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * w;
+    const y = h - ((v - min) / (max - min || 1)) * (h - 4) - 2;
+    return [x, y];
+  });
+  const linePath = 'M ' + pts.map(p => p.join(',')).join(' L ');
+  const fillPath = linePath + ` L ${w},${h} L 0,${h} Z`;
+  const fill = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  fill.setAttribute('d', fillPath);
+  fill.setAttribute('class', 'fill');
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  line.setAttribute('d', linePath);
+  el.appendChild(fill);
+  el.appendChild(line);
+}
+
+clearHistoryBtn.addEventListener('click', () => {
+  localStorage.removeItem('signal_history');
+  renderHistory();
+});
+
+renderHistory();
+
+/* ============================================================
+   TEST ENGINE
+   ============================================================ */
+const startBtn = document.getElementById('startBtn');
+const ctaLabel = document.getElementById('ctaLabel');
+const downVal = document.getElementById('downVal');
+const upVal = document.getElementById('upVal');
+const pingVal = document.getElementById('pingVal');
+const jitterVal = document.getElementById('jitterVal');
+const cards = {
+  download: document.querySelector('.metric-card[data-metric="download"]'),
+  upload: document.querySelector('.metric-card[data-metric="upload"]'),
+  ping: document.querySelector('.metric-card[data-metric="ping"]'),
+};
+
+function setActiveCard(key) {
+  Object.values(cards).forEach(c => c.classList.remove('active'));
+  if (key) cards[key].classList.add('active');
+}
+
+function mean(arr) { return arr.reduce((a, b) => a + b, 0) / arr.length; }
+function stdev(arr) {
+  const m = mean(arr);
+  return Math.sqrt(mean(arr.map(v => (v - m) ** 2)));
+}
+
+async function runPingTest() {
+  setGaugeScale('ping');
+  setActiveCard('ping');
+  setStatus('Measuring ping…');
+  setSweeping(true);
+  const samples = [];
+  for (let i = 0; i < CONFIG.pingSamples; i++) {
+    const t0 = performance.now();
     try {
-        const resp = await fetch('/api/packet-loss', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ packets })
-        });
-        
-        if (!resp.ok) {
-            throw new Error(`Packet loss test failed: ${resp.status}`);
-        }
-        return await resp.json();
-    } catch {
-        return { lossPercent: 0 };
+      await fetch(`${CONFIG.pingUrl}&_=${Date.now()}${i}`, { cache: 'no-store' });
+      const rtt = performance.now() - t0;
+      if (i > 0) samples.push(rtt); // drop first (connection warm-up)
+      setGaugeValue(rtt);
+      pingVal.textContent = rtt.toFixed(0);
+    } catch (e) {
+      throw new Error('ping');
     }
+  }
+  setSweeping(false);
+  const avg = mean(samples);
+  const jitter = stdev(samples);
+  setGaugeValue(avg);
+  pingVal.textContent = avg.toFixed(0);
+  jitterVal.textContent = jitter.toFixed(1);
+  return { ping: avg, jitter };
 }
 
-async function detectISP(enrichmentData = null) {
-    performance.mark('isp-start');
-    try {
-        const res = await fetch('https://ipapi.co/json/', { cache: 'no-cache' });
-        const geoData = await res.json();
-        
-        if (enrichmentData) {
-            // Display enrichment data if available
-            const brand = enrichmentData.display?.brand || 'Unknown';
-            const technology = enrichmentData.display?.technology?.toUpperCase() || '';
-            const downloadMbps = enrichmentData.display?.provisioned?.downloadMbps || '—';
-            const uploadMbps = enrichmentData.display?.provisioned?.uploadMbps || '—';
-            const type = enrichmentData.type || '';
-            
-            document.getElementById('serverInfo').textContent = 
-                `ISP: ${brand} | ${technology}${type ? ' (' + type + ')' : ''} | ↓${downloadMbps} ↑${uploadMbps} Mbps`;
-            document.getElementById('ipInfo').textContent = 
-                `IP: ${geoData.ip} | Lat: ${enrichmentData.location?.latitude?.toFixed(2) || geoData.latitude}, Lon: ${enrichmentData.location?.longitude?.toFixed(2) || geoData.longitude}`;
-        } else {
-            // Fallback to basic IP info
-            document.getElementById('serverInfo').textContent = `ISP: ${geoData.org || 'Unknown'}`;
-            document.getElementById('ipInfo').textContent = 
-                `IP: ${geoData.ip} | Location: ${geoData.city}, ${geoData.country_name}`;
-        }
-    } catch (err) {
-        console.warn('ISP detection failed:', err);
-        document.getElementById('serverInfo').textContent = 'ISP: Detecting...';
-        document.getElementById('ipInfo').textContent = 'IP: Detecting...';
-    }
-    performance.mark('isp-end');
-    performance.measure('ISP Detection', 'isp-start', 'isp-end');
+function runXhrMeasured({ method, url, body, durationMs, onProgress }) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, url, true);
+    if (method === 'GET') xhr.responseType = 'arraybuffer';
+    const t0 = performance.now();
+    let finished = false;
+
+    const progressTarget = method === 'GET' ? xhr : xhr.upload;
+    progressTarget.onprogress = (e) => {
+      const elapsed = performance.now() - t0;
+      onProgress(e.loaded, elapsed);
+    };
+
+    const finish = (bytes) => {
+      if (finished) return;
+      finished = true;
+      const elapsed = performance.now() - t0;
+      resolve({ bytes, elapsedMs: elapsed });
+    };
+
+    xhr.onerror = () => { if (!finished) { finished = true; reject(new Error('network')); } };
+    xhr.onabort = () => { /* handled via timer finish() */ };
+    xhr.onload = () => finish(xhr.responseType === 'arraybuffer' ? (xhr.response ? xhr.response.byteLength : 0) : body ? body.size : 0);
+
+    const timer = setTimeout(() => {
+      // Stop after target duration; use last known progress for the estimate.
+      try { xhr.abort(); } catch {}
+    }, durationMs);
+
+    xhr.onloadend = () => clearTimeout(timer);
+
+    xhr.send(body || null);
+  });
 }
 
-// Web Vitals polyfill for older browsers
-if (!('web-vitals' in window)) {
-    const script = document.createElement('script');
-    script.src = 'https://unpkg.com/web-vitals';
-    document.head.appendChild(script);
+async function runDownloadTest() {
+  setGaugeScale('download');
+  setActiveCard('download');
+  setStatus('Testing download…');
+  setSweeping(true);
+  let lastLoaded = 0, lastT = 0, finalMbps = 0;
+
+  await runXhrMeasured({
+    method: 'GET',
+    url: `${CONFIG.downloadUrl}&_=${Date.now()}`,
+    durationMs: CONFIG.downloadDurationMs,
+    onProgress: (loaded, elapsedMs) => {
+      const dt = (elapsedMs - lastT) / 1000;
+      const dBytes = loaded - lastLoaded;
+      if (dt > 0.05) {
+        const instMbps = (dBytes * 8) / dt / 1_000_000;
+        setGaugeValue(Math.max(instMbps, 0));
+        lastLoaded = loaded; lastT = elapsedMs;
+      }
+      finalMbps = (loaded * 8) / (elapsedMs / 1000) / 1_000_000;
+      downVal.textContent = finalMbps.toFixed(1);
+    },
+  }).catch(() => { throw new Error('download'); });
+
+  setSweeping(false);
+  setGaugeValue(finalMbps);
+  downVal.textContent = finalMbps.toFixed(1);
+  return finalMbps;
 }
+
+function randomBlob(sizeBytes) {
+  const chunkSize = 65536;
+  const buf = new Uint8Array(sizeBytes);
+  for (let offset = 0; offset < sizeBytes; offset += chunkSize) {
+    const len = Math.min(chunkSize, sizeBytes - offset);
+    crypto.getRandomValues(buf.subarray(offset, offset + len));
+  }
+  return new Blob([buf]);
+}
+
+async function runUploadTest() {
+  setGaugeScale('upload');
+  setActiveCard('upload');
+  setStatus('Preparing upload…');
+  setSweeping(true);
+  const blob = randomBlob(CONFIG.uploadChunkBytes);
+  setStatus('Testing upload…');
+
+  let lastLoaded = 0, lastT = 0, finalMbps = 0;
+
+  await runXhrMeasured({
+    method: 'POST',
+    url: CONFIG.uploadUrl,
+    body: blob,
+    durationMs: CONFIG.uploadDurationMs,
+    onProgress: (loaded, elapsedMs) => {
+      const dt = (elapsedMs - lastT) / 1000;
+      const dBytes = loaded - lastLoaded;
+      if (dt > 0.05) {
+        const instMbps = (dBytes * 8) / dt / 1_000_000;
+        setGaugeValue(Math.max(instMbps, 0));
+        lastLoaded = loaded; lastT = elapsedMs;
+      }
+      finalMbps = (loaded * 8) / (elapsedMs / 1000) / 1_000_000;
+      upVal.textContent = finalMbps.toFixed(1);
+    },
+  }).catch(() => { throw new Error('upload'); });
+
+  setSweeping(false);
+  setGaugeValue(finalMbps);
+  upVal.textContent = finalMbps.toFixed(1);
+  return finalMbps;
+}
+
+let testRunning = false;
+
+async function runFullTest() {
+  if (testRunning) return;
+  testRunning = true;
+  startBtn.disabled = true;
+  startBtn.classList.add('running');
+  ctaLabel.textContent = 'Testing…';
+  downVal.textContent = '—'; upVal.textContent = '—'; pingVal.textContent = '—'; jitterVal.textContent = '—';
+
+  try {
+    const { ping, jitter } = await runPingTest();
+    const download = await runDownloadTest();
+    const upload = await runUploadTest();
+
+    setStatus('Done');
+    setActiveCard(null);
+
+    const record = { time: Date.now(), download, upload, ping, jitter };
+    const list = loadHistory();
+    list.unshift(record);
+    saveHistory(list);
+    renderHistory();
+  } catch (err) {
+    setSweeping(false);
+    setActiveCard(null);
+    setStatus('Test failed — check your connection and try again');
+  } finally {
+    testRunning = false;
+    startBtn.disabled = false;
+    startBtn.classList.remove('running');
+    ctaLabel.textContent = 'Run again';
+    setTimeout(() => { if (!testRunning) setStatus('Ready when you are'); }, 2600);
+  }
+}
+
+startBtn.addEventListener('click', runFullTest);
+
+/* Initial paint */
+setGaugeScale('download');
+setGaugeValue(0);

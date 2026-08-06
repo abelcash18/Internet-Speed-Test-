@@ -1,93 +1,142 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Modern Speed Test PWA</title>
-    <link rel="preconnect" href="https://ipapi.co">
-    <link rel="preconnect" href="https://cdn.jsdelivr.net">
-    <link rel="dns-prefetch" href="https://cdnjs.cloudflare.com">
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#667eea">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='75' font-size='75'>⚡</text></svg>" type="image/svg+xml">
-    <link rel="stylesheet" href="style.css" media="print" onload="this.media='all'">
-    <noscript><link rel="stylesheet" href="style.css"></noscript>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Signal — Internet Speed Test</title>
+<meta name="description" content="A fast, browser-based internet speed test with a live radial gauge, ping, and history." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+ <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='75' font-size='75'>⚡</text></svg>" type="image/svg+xml">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🚀 Speed Test</h1>
-            <p class="subtitle">Check your internet connection speed</p>
-            <label class="dark-toggle">
-                <input type="checkbox" id="darkToggle" onchange="toggleDarkMode()">
-                <span>🌙 Dark Mode</span>
-            </label>
-        </div>
 
-        <div class="main-display">
-<div class="speed-box" role="main" aria-live="polite" aria-label="Main speed display">
-                <div class="speed-value" id="speedValue" aria-describedby="speedLabel">0</div>
-                <div class="speed-unit" id="speedUnit">Mbps</div>
-                <div class="speed-label" id="speedLabel" aria-hidden="true">Ready</div>
-            </div>
+<div class="noise-layer" aria-hidden="true"></div>
 
-            <button class="start-button" id="startBtn" onclick="startTest()">
-                Start Test
-            </button>
-            <button class="share-button" id="shareBtn" onclick="shareResult()" style="margin-top: 10px; background: #4CAF50;">
-                📱 Share
-            </button>
-            <button class="share-button" id="csvBtn" onclick="downloadCSV()" style="margin-top: 10px; background: #2196F3;">
-                📥 Download CSV
-            </button>
-        </div>
+<header class="topbar">
+  <div class="wordmark">
+    <span class="wordmark-dot" aria-hidden="true"></span>
+    SIGNAL
+  </div>
+  <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch theme" aria-pressed="false">
+    <svg class="icon icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.4M12 19.1v2.4M4.2 4.2l1.7 1.7M18.1 18.1l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.2 19.8l1.7-1.7M18.1 5.9l1.7-1.7"/></svg>
+    <svg class="icon icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.8 6.8 0 0 0 10.5 10.5z"/></svg>
+  </button>
+</header>
 
-        <div class="metrics">
-            <div class="metric-item">
-                <span class="metric-label">Download</span>
-                <span class="metric-value" id="downloadSpeed">—</span>
-            </div>
-            <div class="metric-item">
-                <span class="metric-label">Upload</span>
-                <span class="metric-value" id="uploadSpeed">—</span>
-            </div>
-            <div class="metric-item">
-                <span class="metric-label">Ping</span>
-                <span class="metric-value" id="ping">—</span>
-            </div>
-            <div class="metric-item">
-                <span class="metric-label">Jitter</span>
-                <span class="metric-value" id="jitter">—</span>
-            </div>
-            <div class="metric-item">
-                <span class="metric-label">Packet Loss</span>
-                <span class="metric-value" id="packetLoss">—</span>
-            </div>
-        </div>
-        <canvas id="speedChart" width="400" height="200" style="max-width: 100%; margin: 20px 0; background: var(--glass-bg); border-radius: 16px; padding: 20px;"></canvas>
+<main class="stage">
 
-        <div class="progress-container">
-            <div class="progress-bar" id="progressBar"></div>
-            <div class="progress-text" id="progressText"></div>
-        </div>
+  <!-- HERO / GAUGE -->
+  <section class="gauge-section" aria-label="Speed test gauge">
+    <div class="gauge-wrap">
+      <svg id="gaugeSvg" class="gauge-svg" viewBox="0 0 320 320" role="img" aria-labelledby="gaugeTitle">
+        <title id="gaugeTitle">Speed gauge</title>
+        <defs>
+          <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+            <feGaussianBlur stdDeviation="5" result="blur"/>
+            <feMerge>
+              <feMergeNode in="blur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+          <linearGradient id="sweepGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="var(--accent-current)" stop-opacity="0"/>
+            <stop offset="100%" stop-color="var(--accent-current)" stop-opacity="0.9"/>
+          </linearGradient>
+        </defs>
+        <g id="tickLayer"></g>
+        <path id="trackArc" class="track-arc" fill="none"></path>
+        <path id="progressArc" class="progress-arc" fill="none" filter="url(#glow)"></path>
+        <g id="sweepGroup" class="sweep-group" opacity="0">
+          <circle id="sweepDot" r="5" fill="var(--accent-current)" filter="url(#glow)"></circle>
+        </g>
+        <g id="needleGroup" class="needle-group">
+          <line id="needleLine" x1="160" y1="160" x2="160" y2="58" class="needle-line" />
+          <circle cx="160" cy="160" r="7" class="needle-hub" />
+        </g>
+      </svg>
 
-        <div class="history-section">
-            <div class="history-header">
-                <h2>📊 History</h2>
-                <button class="clear-btn" onclick="clearHistory()">Clear</button>
-            </div>
-            <div class="history-list" id="historyList">
-                <p class="no-history">No test results yet</p>
-            </div>
+      <div class="gauge-readout">
+        <div class="readout-value">
+          <span id="readoutNumber">0.0</span>
+          <span id="readoutUnit" class="readout-unit">Mbps</span>
         </div>
-
-        <div class="server-info">
-            <p id="serverInfo">Server: Detecting...</p>
-            <p id="ipInfo">IP: Detecting...</p>
+        <div class="readout-status">
+          <span id="statusDot" class="status-dot"></span>
+          <span id="statusText">Ready when you are</span>
         </div>
+      </div>
     </div>
 
-    <script src="script.js"></script>
+    <button id="startBtn" class="cta-btn" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="cta-icon"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+      <span id="ctaLabel">Start test</span>
+    </button>
+    <p class="cta-hint" id="ctaHint">Measures download, upload, and ping using your live connection.</p>
+  </section>
+
+  <!-- METRIC CARDS -->
+  <section class="metrics" aria-label="Test results">
+    <article class="metric-card" data-metric="download">
+      <div class="metric-head">
+        <svg class="metric-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v13"/><path d="m6 11 6 6 6-6"/><path d="M5 21h14"/></svg>
+        <span>Download</span>
+      </div>
+      <div class="metric-value"><span id="downVal">—</span><small>Mbps</small></div>
+      <svg class="sparkline" id="downSpark" viewBox="0 0 100 28" preserveAspectRatio="none"></svg>
+    </article>
+
+    <article class="metric-card" data-metric="upload">
+      <div class="metric-head">
+        <svg class="metric-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V8"/><path d="m6 13 6-6 6 6"/><path d="M5 3h14"/></svg>
+        <span>Upload</span>
+      </div>
+      <div class="metric-value"><span id="upVal">—</span><small>Mbps</small></div>
+      <svg class="sparkline" id="upSpark" viewBox="0 0 100 28" preserveAspectRatio="none"></svg>
+    </article>
+
+    <article class="metric-card" data-metric="ping">
+      <div class="metric-head">
+        <svg class="metric-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l2-7 4 14 2-7h8"/></svg>
+        <span>Ping</span>
+      </div>
+      <div class="metric-value"><span id="pingVal">—</span><small>ms</small></div>
+      <div class="metric-sub"><span id="jitterVal">—</span> ms jitter</div>
+    </article>
+  </section>
+
+  <!-- HISTORY -->
+  <section class="history" aria-label="Recent test history">
+    <div class="history-head">
+      <h2>Recent tests</h2>
+      <button id="clearHistory" class="ghost-btn" type="button">Clear</button>
+    </div>
+    <div class="history-table-wrap">
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Download</th>
+            <th>Upload</th>
+            <th>Ping</th>
+            <th>Jitter</th>
+          </tr>
+        </thead>
+        <tbody id="historyBody">
+          <tr class="history-empty-row">
+            <td colspan="5">No tests yet — run one above and it'll show up here.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <p class="footnote">Runs entirely in your browser. Results are estimates and vary with network conditions, server load, and other traffic on your connection.</p>
+
+</main>
+
+<script src="script.js"></script>
 </body>
 </html>
