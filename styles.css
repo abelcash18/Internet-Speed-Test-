@@ -65,6 +65,26 @@ body{
   overflow-x: hidden;
 }
 
+
+.cute-footer {
+    position: fixed;
+    bottom: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(255, 255, 255, 0.08);
+    padding: 10px 18px;
+    border-radius: 999px;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.cute-footer p {
+    margin: 0;
+    color: #f8fafc;
+    font-size: 0.82rem;
+    text-align: center;
+}
+
 .noise-layer{
   position: fixed; inset:0; pointer-events:none; z-index:0;
   background-image: radial-gradient(circle at 20% 15%, var(--accent-current-soft), transparent 45%),
