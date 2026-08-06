@@ -130,19 +130,24 @@ body {
 
 .metrics {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 20px;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 18px;
     margin-bottom: 30px;
-    padding: 20px;
+    padding: 22px;
     background: var(--glass-bg);
     backdrop-filter: blur(10px);
     border-radius: 20px;
-    border: 1px solid rgba(255,255,255,0.2);
+    border: 1px solid rgba(255,255,255,0.22);
 }
 
 .metric-item {
     display: flex;
     flex-direction: column;
+    gap: 10px;
+    padding: 18px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,0.14);
 }
 
 .skeleton {
@@ -227,7 +232,7 @@ body {
 .history-section {
     margin-top: 40px;
     padding-top: 30px;
-    border-top: 2px solid #f0f0f0;
+    border-top: 2px solid rgba(0, 0, 0, 0.06);
 }
 
 .history-header {
