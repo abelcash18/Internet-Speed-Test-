@@ -15,7 +15,7 @@ const CONFIG = {
   uploadDurationMs: 7000,
   uploadChunkBytes: 24 * 1024 * 1024, // 24MB payload
   pingSamples: 6,
-  historyLimit: 20,
+  historyLimit: Infinity, // Stores every speed test indefinitely
 };
 
 const SCALES = {
@@ -171,7 +171,8 @@ function loadHistory() {
 }
 
 function saveHistory(list) {
-  localStorage.setItem('signal_history', JSON.stringify(list.slice(0, CONFIG.historyLimit)));
+  const sliceLimit = CONFIG.historyLimit === Infinity ? list.length : CONFIG.historyLimit;
+  localStorage.setItem('signal_history', JSON.stringify(list.slice(0, sliceLimit)));
 }
 
 function renderHistory() {
@@ -180,7 +181,6 @@ function renderHistory() {
     historyBody.innerHTML = `<tr class="history-empty-row"><td colspan="5">No tests yet — run one above and it'll show up here.</td></tr>`;
   } else {
     historyBody.innerHTML = list.map(r => {
-      // Safe timestamp access handling legacy or extension data formats
       const recordTime = r?.time ?? r?.timestamp ?? Date.now();
       const download = r?.download ?? 0;
       const upload = r?.upload ?? 0;
@@ -411,29 +411,40 @@ async function runFullTest() {
   ctaLabel.textContent = 'Testing…';
   downVal.textContent = '—'; upVal.textContent = '—'; pingVal.textContent = '—'; jitterVal.textContent = '—';
 
+  const record = { time: Date.now(), download: 0, upload: 0, ping: 0, jitter: 0 };
+  let hasFailed = false;
+
   try {
     const { ping, jitter } = await runPingTest();
+    record.ping = ping;
+    record.jitter = jitter;
+
     const download = await runDownloadTest();
+    record.download = download;
+
     const upload = await runUploadTest();
+    record.upload = upload;
 
     setStatus('Done');
-    setActiveCard(null);
-
-    const record = { time: Date.now(), download, upload, ping, jitter };
+  } catch (err) {
+    hasFailed = true;
+    setStatus('Test incomplete — saved partial results');
+  } finally {
+    // Record into local storage regardless of full or partial completion
     const list = loadHistory();
     list.unshift(record);
     saveHistory(list);
     renderHistory();
-  } catch (err) {
+
     setSweeping(false);
     setActiveCard(null);
-    setStatus('Test failed — check your connection and try again');
-  } finally {
     testRunning = false;
     startBtn.disabled = false;
     startBtn.classList.remove('running');
     ctaLabel.textContent = 'Run again';
-    setTimeout(() => { if (!testRunning) setStatus('Ready when you are'); }, 2600);
+    setTimeout(() => { 
+      if (!testRunning && !hasFailed) setStatus('Ready when you are'); 
+    }, 2600);
   }
 }
 
