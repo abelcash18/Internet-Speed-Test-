@@ -176,21 +176,30 @@ function saveHistory(list) {
 
 function renderHistory() {
   const list = loadHistory();
-  if (!list.length) {
+  if (!list || !list.length) {
     historyBody.innerHTML = `<tr class="history-empty-row"><td colspan="5">No tests yet — run one above and it'll show up here.</td></tr>`;
   } else {
-    historyBody.innerHTML = list.map(r => `
-      <tr>
-        <td>${new Date(r.time).toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}</td>
-        <td>${r.download.toFixed(1)} Mbps</td>
-        <td>${r.upload.toFixed(1)} Mbps</td>
-        <td>${r.ping.toFixed(0)} ms</td>
-        <td>${r.jitter.toFixed(1)} ms</td>
-      </tr>
-    `).join('');
+    historyBody.innerHTML = list.map(r => {
+      // Safe timestamp access handling legacy or extension data formats
+      const recordTime = r?.time ?? r?.timestamp ?? Date.now();
+      const download = r?.download ?? 0;
+      const upload = r?.upload ?? 0;
+      const ping = r?.ping ?? 0;
+      const jitter = r?.jitter ?? 0;
+
+      return `
+        <tr>
+          <td>${new Date(recordTime).toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}</td>
+          <td>${download.toFixed(1)} Mbps</td>
+          <td>${upload.toFixed(1)} Mbps</td>
+          <td>${ping.toFixed(0)} ms</td>
+          <td>${jitter.toFixed(1)} ms</td>
+        </tr>
+      `;
+    }).join('');
   }
-  renderSparkline('downSpark', list.map(r => r.download).reverse());
-  renderSparkline('upSpark', list.map(r => r.upload).reverse());
+  renderSparkline('downSpark', list.map(r => r?.download ?? 0).reverse());
+  renderSparkline('upSpark', list.map(r => r?.upload ?? 0).reverse());
 }
 
 function renderSparkline(svgId, values) {
@@ -243,10 +252,10 @@ function setActiveCard(key) {
   if (key) cards[key].classList.add('active');
 }
 
-function mean(arr) { return arr.reduce((a, b) => a + b, 0) / arr.length; }
+function mean(arr) { return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0; }
 function stdev(arr) {
   const m = mean(arr);
-  return Math.sqrt(mean(arr.map(v => (v - m) ** 2)));
+  return arr.length ? Math.sqrt(mean(arr.map(v => (v - m) ** 2))) : 0;
 }
 
 async function runPingTest() {
@@ -287,10 +296,11 @@ function runXhrMeasured({ method, url, body, durationMs, onProgress }) {
     const progressTarget = method === 'GET' ? xhr : xhr.upload;
     progressTarget.onprogress = (e) => {
       const elapsed = performance.now() - t0;
-      onProgress(e.loaded, elapsed);
+      const loaded = e?.loaded ?? 0;
+      onProgress(loaded, elapsed);
     };
 
-    const finish = (bytes) => {
+    const finish = (bytes = 0) => {
       if (finished) return;
       finished = true;
       const elapsed = performance.now() - t0;
@@ -299,7 +309,7 @@ function runXhrMeasured({ method, url, body, durationMs, onProgress }) {
 
     xhr.onerror = () => { if (!finished) { finished = true; reject(new Error('network')); } };
     xhr.onabort = () => { /* handled via timer finish() */ };
-    xhr.onload = () => finish(0);
+    xhr.onload = (e) => finish(e?.loaded ?? 0);
 
     const timer = setTimeout(() => {
       try { xhr.abort(); } catch {}
