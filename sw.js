@@ -5,7 +5,8 @@ const urlsToCache = [
   '/index.html',
   '/style.css',
   '/script.js',
-  'https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.js',
+  '/script.min.js',
+  'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
   'https://unpkg.com/web-vitals'
 ];
 

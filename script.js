@@ -22,7 +22,15 @@ function setStorage(key, value) {
     }
 }
 
-let testResults = JSON.parse(getStorage('speedTestResults', '[]'));
+let testResults = [];
+try {
+    const stored = getStorage('speedTestResults', '[]');
+    testResults = JSON.parse(stored);
+    if (!Array.isArray(testResults)) testResults = [];
+} catch (e) {
+    testResults = [];
+}
+
 darkMode = getStorage('darkMode', 'false') === 'true';
 
 // Check if API is available
@@ -54,6 +62,12 @@ function isApiEnabled() {
 
 // Modern Speed Test with real server measurements
 document.addEventListener('DOMContentLoaded', async () => {
+    const startBtn = document.getElementById('startBtn');
+    if (startBtn) {
+        startBtn.disabled = true;
+        startBtn.textContent = 'Checking server...';
+    }
+
     loadHistory();
     initDarkMode();
     detectISP();
@@ -62,17 +76,20 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (isGitHubPages) {
         showWarning('GitHub Pages can show the interface, but the full speed test requires the local Node server. Run npm start locally.');
-        const btn = document.getElementById('startBtn');
-        if (btn) {
-            btn.disabled = true;
-            btn.textContent = 'Local server required';
+        if (startBtn) {
+            startBtn.disabled = true;
+            startBtn.textContent = 'Local server required';
         }
     } else if (!apiAvailable) {
         showWarning('Real-time testing needs the included Node server. Run npm start and open http://localhost:3000.');
-        const btn = document.getElementById('startBtn');
-        if (btn) {
-            btn.disabled = true;
-            btn.textContent = 'Server unavailable';
+        if (startBtn) {
+            startBtn.disabled = true;
+            startBtn.textContent = 'Server unavailable';
+        }
+    } else {
+        if (startBtn) {
+            startBtn.disabled = false;
+            startBtn.textContent = 'Start Test';
         }
     }
 
@@ -92,7 +109,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js')
+        navigator.serviceWorker.register('/sw.min.js')
             .then(reg => console.log('SW registered'))
             .catch(err => console.log('SW registration not available (insecure origin or static host)', err));
     }
