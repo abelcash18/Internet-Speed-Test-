@@ -69,6 +69,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     } else if (!apiAvailable) {
         showWarning('Real-time testing needs the included Node server. Run npm start and open http://localhost:3000.');
+        const btn = document.getElementById('startBtn');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Server unavailable';
+        }
     }
 
     if (window.Chart) {

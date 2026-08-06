@@ -1,25 +1,31 @@
 # 🚀 Internet Speed Test Application
 
-A fast, lightweight, and fully deployable internet speed test application built with pure HTML, CSS, and JavaScript. No backend required!
+A fast, lightweight internet speed test application built with HTML, CSS, and JavaScript, backed by a small Node.js server for accurate upload and download measurement.
 
 ## Features
 
 ✅ **Download Speed Testing** - Measures your download bandwidth  
-✅ **Upload Speed Testing** - Estimates upload capability  
-✅ **Ping Measurement** - Tests latency to servers  
+✅ **Upload Speed Testing** - Measures upload throughput with real request traffic  
+✅ **Ping Measurement** - Tests latency to the local server  
 ✅ **Jitter Analysis** - Measures connection stability  
+✅ **Packet Loss Estimate** - Tracks lost packets during a small packet test  
 ✅ **Test History** - Stores up to 20 recent test results in browser  
 ✅ **Responsive Design** - Works on desktop, tablet, and mobile  
-✅ **Real transfer measurements** - Uses the included server to measure actual download and upload traffic  
-✅ **Local Storage** - History persists across sessions  
+✅ **Local Storage** - Results persist across sessions  
+
+> Note: The full speed test requires the included Node.js server. The interface can be hosted statically, but accurate measurements require running `npm start` locally.
 
 ## Project Structure
 
 ```
-speed-test-app/
+Internet-Speed-Test-/
 ├── index.html          # Main HTML file
 ├── style.css           # Styling and animations
 ├── script.js           # Speed test logic
+├── server.js           # Node.js backend for real tests
+├── sw.js               # Service worker for PWA caching
+├── manifest.json       # PWA manifest
+├── package.json        # Node dependencies and scripts
 └── README.md           # This file
 ```
 

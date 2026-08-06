@@ -1,9 +1,9 @@
 # TODO
 
-- [ ] Audit `script.js` for all `/api/*` fetch calls and current GitHub Pages gating.
-- [ ] Update `script.js` to hard-disable all `/api/*` calls when `isGitHubPages` is true.
-- [ ] Update `script.js` to set `apiAvailable=false` if API requests fail with 404 (and avoid repeated attempts).
-- [ ] Add guards so code never reads `result.timestamp` / history fields when `result` is undefined.
-- [ ] Rebuild `script.min.js` if needed.
-- [ ] Verify by running locally (`npm start`) and (if possible) checking GitHub Pages behavior.
+- [x] Audit `script.js` for `/api/*` fetch calls and GitHub Pages gating.
+- [x] Disable `/api/*` calls when `isGitHubPages` is true.
+- [x] Set `apiAvailable=false` on failed API requests and avoid repeated availability checks.
+- [x] Guard against reading undefined history fields.
+- [ ] Rebuild `script.min.js` if you want a minified production bundle.
+- [x] Verify locally by running `npm start`.
 
