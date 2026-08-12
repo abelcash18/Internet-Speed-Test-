@@ -4,8 +4,10 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Internet Speed Test</title>
-    <link rel="icon" href="icon-1.jpg" type="image/jpg">
-    <link rel="apple-touch-icon" href="icon-1.jpg">
+<meta name="theme-color" content="#080d18" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="icon" href="icon-1.jpg" type="image/jpeg">
+<link rel="apple-touch-icon" href="icon-192.jpg">
 <meta name="description" content="A fast, browser-based internet speed test with a live radial gauge, ping, and history." />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,6 +17,11 @@
 <body>
 
 <div class="noise-layer" aria-hidden="true"></div>
+
+<aside id="updateNotice" class="update-notice" role="status" aria-live="polite" hidden>
+  <span>A new version is ready.</span>
+  <button id="updateBtn" type="button">Update</button>
+</aside>
 
 <header class="topbar">
   <div class="wordmark">

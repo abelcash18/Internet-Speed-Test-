@@ -3,13 +3,18 @@
 A single-page, browser-based internet speed test with a live radial gauge, ping/jitter, download/upload, and a local history log.
 
 ## Run it
-Just open `index.html` in a browser — no build step, no dependencies. For best results (and to avoid any local file:// restrictions some browsers apply to fonts/requests), serve it over a simple local server, e.g.:
+No build step or dependencies are required. To use the installable PWA and offline shell, serve it over HTTPS (or `localhost`) rather than opening it as `file://`. For local development:
 
 ```
 npx serve .
 # or
 python3 -m http.server 8080
 ```
+
+Open the displayed local URL, then use your browser's **Install app** option. The app shell stays available offline; running an actual speed test still needs a live connection.
+
+## Updates
+When you deploy a new version, increment `CACHE_NAME` in `service-worker.js`. Existing installations detect the new service worker and show an **Update** button; selecting it activates the version and reloads the app. This avoids replacing files in the middle of a test.
 
 ## How the test works
 - **Ping**: sends several tiny requests and times the round trip, discarding the first (connection warm-up) and averaging the rest. Jitter is the standard deviation of those samples.

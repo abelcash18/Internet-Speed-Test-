@@ -450,6 +450,50 @@ async function runFullTest() {
 
 startBtn.addEventListener('click', runFullTest);
 
+/* ============================================================
+   PWA UPDATES
+   The service worker caches only this app's shell. Test requests
+   remain live and are never stored by the browser cache.
+   ============================================================ */
+const updateNotice = document.getElementById('updateNotice');
+const updateBtn = document.getElementById('updateBtn');
+
+if ('serviceWorker' in navigator) {
+  let registration;
+  let refreshing = false;
+  const hadController = Boolean(navigator.serviceWorker.controller);
+
+  const showUpdate = () => { updateNotice.hidden = false; };
+
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController && !refreshing) {
+      refreshing = true;
+      window.location.reload();
+    }
+  });
+
+  window.addEventListener('load', async () => {
+    try {
+      registration = await navigator.serviceWorker.register('./service-worker.js');
+      if (registration.waiting) showUpdate();
+
+      registration.addEventListener('updatefound', () => {
+        const worker = registration.installing;
+        if (!worker) return;
+        worker.addEventListener('statechange', () => {
+          if (worker.state === 'installed' && navigator.serviceWorker.controller) showUpdate();
+        });
+      });
+    } catch (error) {
+      console.warn('Offline mode could not be enabled:', error);
+    }
+  });
+
+  updateBtn.addEventListener('click', () => {
+    if (registration?.waiting) registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+  });
+}
+
 /* Initial paint */
 setGaugeScale('download');
 setGaugeValue(0);

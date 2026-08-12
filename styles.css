@@ -65,6 +65,35 @@ body{
   overflow-x: hidden;
 }
 
+.update-notice{
+  position: fixed;
+  z-index: 10;
+  right: 18px;
+  bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px 11px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 12px 32px rgba(0,0,0,.24);
+  font: 500 .82rem var(--font-body);
+}
+
+.update-notice[hidden]{ display:none; }
+.update-notice button{
+  appearance: none;
+  border: 0;
+  border-radius: 7px;
+  padding: 7px 10px;
+  background: var(--accent-down);
+  color: #07110e;
+  font: 700 .78rem var(--font-display);
+  cursor: pointer;
+}
+
 
 .cute-footer {
     position: fixed;
