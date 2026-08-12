@@ -292,26 +292,31 @@ function runXhrMeasured({ method, url, body, durationMs, onProgress }) {
     
     const t0 = performance.now();
     let finished = false;
+    let loadedBytes = 0;
+    let timer;
 
     const progressTarget = method === 'GET' ? xhr : xhr.upload;
     progressTarget.onprogress = (e) => {
       const elapsed = performance.now() - t0;
       const loaded = e?.loaded ?? 0;
+      loadedBytes = loaded;
       onProgress(loaded, elapsed);
     };
 
-    const finish = (bytes = 0) => {
+    const finish = (bytes = loadedBytes) => {
       if (finished) return;
       finished = true;
+      clearTimeout(timer);
       const elapsed = performance.now() - t0;
       resolve({ bytes, elapsedMs: elapsed });
     };
 
-    xhr.onerror = () => { if (!finished) { finished = true; reject(new Error('network')); } };
-    xhr.onabort = () => { /* handled via timer finish() */ };
+    xhr.onerror = () => { if (!finished) { finished = true; clearTimeout(timer); reject(new Error('network')); } };
+    xhr.onabort = () => finish(loadedBytes);
     xhr.onload = (e) => finish(e?.loaded ?? 0);
 
-    const timer = setTimeout(() => {
+    timer = setTimeout(() => {
+      finish(loadedBytes);
       try { xhr.abort(); } catch {}
     }, durationMs);
 
@@ -327,7 +332,7 @@ async function runDownloadTest() {
   setSweeping(true);
   let lastLoaded = 0, lastT = 0, finalMbps = 0;
 
-  await runXhrMeasured({
+  const downloadResult = await runXhrMeasured({
     method: 'GET',
     url: `${CONFIG.downloadUrl}&_=${Date.now()}`,
     durationMs: CONFIG.downloadDurationMs,
@@ -345,6 +350,7 @@ async function runDownloadTest() {
     },
   }).catch(() => { throw new Error('download'); });
 
+  finalMbps = (downloadResult.bytes * 8) / (downloadResult.elapsedMs / 1000) / 1_000_000;
   setSweeping(false);
   setGaugeValue(finalMbps);
   downVal.textContent = finalMbps.toFixed(1);
@@ -376,7 +382,7 @@ async function runUploadTest() {
 
   let lastLoaded = 0, lastT = 0, finalMbps = 0;
 
-  await runXhrMeasured({
+  const uploadResult = await runXhrMeasured({
     method: 'POST',
     url: CONFIG.uploadUrl,
     body: blob,
@@ -395,6 +401,7 @@ async function runUploadTest() {
     },
   }).catch(() => { throw new Error('upload'); });
 
+  finalMbps = (uploadResult.bytes * 8) / (uploadResult.elapsedMs / 1000) / 1_000_000;
   setSweeping(false);
   setGaugeValue(finalMbps);
   upVal.textContent = finalMbps.toFixed(1);
