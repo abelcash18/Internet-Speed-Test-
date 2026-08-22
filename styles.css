@@ -103,8 +103,9 @@ body{
 }
 .cute-footer p {
     margin: 0;
-    color: #f8fafc;
+    color: teal;
     font-size: 0.82rem;
+    font-weight: 800;
     text-align: center;
 }
 .noise-layer{
