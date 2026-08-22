@@ -15,14 +15,11 @@
 <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-
 <div class="noise-layer" aria-hidden="true"></div>
-
 <aside id="updateNotice" class="update-notice" role="status" aria-live="polite" hidden>
   <span>A new version is ready.</span>
   <button id="updateBtn" type="button">Update</button>
 </aside>
-
 <header class="topbar">
   <div class="wordmark">
     <span class="wordmark-dot" aria-hidden="true"></span>
@@ -33,10 +30,7 @@
     <svg class="icon icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.8 6.8 0 0 0 10.5 10.5z"/></svg>
   </button>
 </header>
-
 <main class="stage">
-
-  <!-- HERO / GAUGE -->
   <section class="gauge-section" aria-label="Speed test gauge">
     <div class="gauge-wrap">
       <svg id="gaugeSvg" class="gauge-svg" viewBox="0 0 320 320" role="img" aria-labelledby="gaugeTitle">
@@ -65,7 +59,6 @@
           <circle cx="160" cy="160" r="7" class="needle-hub" />
         </g>
       </svg>
-
       <div class="gauge-readout">
         <div class="readout-value">
           <span id="readoutNumber">0.0</span>
@@ -84,8 +77,6 @@
     </button>
     <p class="cta-hint" id="ctaHint">Measures download, upload, and ping using your live connection.</p>
   </section>
-
-  <!-- METRIC CARDS -->
   <section class="metrics" aria-label="Test results">
     <article class="metric-card" data-metric="download">
       <div class="metric-head">
@@ -95,7 +86,6 @@
       <div class="metric-value"><span id="downVal">—</span><small>Mbps</small></div>
       <svg class="sparkline" id="downSpark" viewBox="0 0 100 28" preserveAspectRatio="none"></svg>
     </article>
-
     <article class="metric-card" data-metric="upload">
       <div class="metric-head">
         <svg class="metric-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V8"/><path d="m6 13 6-6 6 6"/><path d="M5 3h14"/></svg>
@@ -104,7 +94,6 @@
       <div class="metric-value"><span id="upVal">—</span><small>Mbps</small></div>
       <svg class="sparkline" id="upSpark" viewBox="0 0 100 28" preserveAspectRatio="none"></svg>
     </article>
-
     <article class="metric-card" data-metric="ping">
       <div class="metric-head">
         <svg class="metric-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l2-7 4 14 2-7h8"/></svg>
@@ -114,8 +103,6 @@
       <div class="metric-sub"><span id="jitterVal">—</span> ms jitter</div>
     </article>
   </section>
-
-  <!-- HISTORY -->
   <section class="history" aria-label="Recent test history">
     <div class="history-head">
       <h2>Recent tests</h2>
